@@ -18,7 +18,8 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = (".gitignore", ".gitattributes", "README.md", "config/build.json",
-            "src/bootstrap/isolate.rb", "tools/h0.py", "tests/test_h0.py",
+            "src/bootstrap/isolate.rb", "tools/h0.py", "tools/wine_smoke.py",
+            "tests/test_h0.py",
             "docs/architecture.md", "docs/requirements.md", "docs/hito-0.md",
             "docs/third-party.md", "packaging/windows/Prepare.ps1",
             "packaging/windows/Launch.ps1")
@@ -218,9 +219,13 @@ def verify(repo: Path, include_source: bool = True) -> dict:
             raise SafetyError("Invalid client identifier")
         base = local / "clients" / client
         game, profile = base / "game", base / "profile"
-        for current, dirs, names in os.walk(base, followlinks=False):
-            for name in dirs + names:
-                no_links(Path(current) / name)
+        no_links(base / "wine-prefix")
+        # Wine creates standard links inside its prefix (for example Downloads).
+        # The game and the private save profile must still contain no links.
+        for checked_root in (game, profile):
+            for current, dirs, names in os.walk(checked_root, followlinks=False):
+                for name in dirs + names:
+                    no_links(Path(current) / name)
         no_links(profile / "saves")
         if not (profile / "saves").is_dir():
             raise SafetyError("Save directory missing")
@@ -254,7 +259,8 @@ def verify(repo: Path, include_source: bool = True) -> dict:
             identities.add(identity)
     return {"status": "PASS", "original_files": len(baseline["files"]),
             "original_checked": include_source, "clients": len(tokens),
-            "independent_files": True, "save_isolation_runtime": "NOT_RUN"}
+            "independent_files": True,
+            "save_isolation_runtime": "SEE_SEPARATE_RUNTIME_REPORTS"}
 
 
 def doctor(repo: Path) -> dict:
@@ -266,7 +272,8 @@ def doctor(repo: Path) -> dict:
     return {"python": sys.version.split()[0], "platform": platform.platform(),
             "tools": found, "structure_missing": [p for p in REQUIRED if not (repo / p).is_file()],
             "runtime": "AVAILABLE_UNTESTED" if native or wine else "BLOCKED_NO_WINE",
-            "native_windows_x64": native, "actual_game_execution": "NOT_RUN"}
+            "native_windows_x64": native,
+            "actual_game_execution": "NOT_CHECKED_BY_DOCTOR"}
 
 
 def launch_plan(repo: Path, clients: list[str]) -> dict:

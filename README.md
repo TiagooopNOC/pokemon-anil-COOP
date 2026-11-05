@@ -39,6 +39,7 @@ Co-op Anything. Ver instrucciones y límites en [Hito 0](docs/hito-0.md).
 - [Procedimiento de preparación, Windows y guardados](docs/hito-0.md).
 - [Dependencias, licencias y evaluación de VMS](docs/third-party.md).
 
-El arranque del preload y el ciclo guardar/cerrar/cargar en el runtime real siguen
-pendientes. No declarar cerrado ese control ni avanzar a pruebas de conexión antes
-de validarlo. El trabajo de este repositorio se limita al Hito 0.
+El arranque del preload y el ciclo guardar/cerrar/cargar se comprobaron bajo Wine
+en Linux Mint. Dos copias crearon guardados privados distintos. La validación en
+Windows x64 nativo sigue pendiente. El trabajo de este repositorio se limita al
+Hito 0.

@@ -126,6 +126,15 @@ class WorkspaceSafety(unittest.TestCase):
         with self.assertRaises(h0.SafetyError):
             h0.verify(self.repo)
 
+    def test_wine_prefix_can_contain_its_own_standard_links(self):
+        self.prepare(1)
+        link = self.repo / "local/clients/client01/wine-prefix/Downloads"
+        try:
+            link.symlink_to(self.base, target_is_directory=True)
+        except OSError:
+            self.skipTest("Symlink creation unavailable to this Windows account")
+        self.assertEqual(h0.verify(self.repo)["status"], "PASS")
+
     def test_detects_removed_bootstrap_and_mutated_config(self):
         self.prepare(1)
         cfg = self.repo / "local/clients/client01/game/mkxp.json"
@@ -168,7 +177,7 @@ class WorkspaceSafety(unittest.TestCase):
         with patch.object(h0.os, "name", "posix"), patch.object(h0.shutil, "which", return_value=None):
             result = h0.doctor(self.repo)
         self.assertEqual(result["runtime"], "BLOCKED_NO_WINE")
-        self.assertEqual(result["actual_game_execution"], "NOT_RUN")
+        self.assertEqual(result["actual_game_execution"], "NOT_CHECKED_BY_DOCTOR")
 
     def test_jsonc_preserves_strings_and_urls(self):
         self.assertEqual(h0.parse_jsonc('{"url":"https://test/a",/*comment*/"s":"//x"}'),

@@ -81,18 +81,30 @@ No cambia la política global de PowerShell ni instala componentes automáticame
 
 ## Linux Mint / Wine
 
-Wine, wine64 y winepath no estaban disponibles al preparar Hito 0. Por eso no se
-inicializaron prefijos ni se ejecutó Game.exe. Hay cuatro directorios reservados,
-plan de comando, cwd, variables y rutas independientes. `launch --run` está limitado
-al objetivo Windows nativo: antes de habilitarlo en Wine hay que instalar/configurar
-Wine con autorización y validar el manejo de slots/PID y conversión de rutas.
+Wine 9.0 se instaló posteriormente en este Linux Mint. Se inicializaron prefijos
+privados de client01 y client02 y se ejecutaron esas copias con
+`tools/wine_smoke.py`. Cada ejecución usa el plan de `tools/h0.py`, comprueba la
+integridad, adquiere GameSlot y limita la duración. La sandbox de Codex produjo
+`Bad system call` con Wine; las ejecuciones exitosas usaron permiso de sandbox
+escalado, sin privilegios administrativos ni instalación nueva en esta sesión.
+`launch --run` sigue limitado al objetivo Windows nativo; el runner Wine es una
+herramienta de prueba separada, con limpieza de su prefijo privado.
+
+```sh
+python3 -B tools/wine_smoke.py --client client01 --seconds 120 \
+  --gameslot ../coop-anything/tools/gameslot/gameslot.py
+```
+
+Ese runner comprueba arranque/preload; crear y recargar una partida requiere
+interacción con la interfaz y evidencia separada. Cada nueva ejecución exige
+archivar el marcador de preload anterior en el perfil privado.
 QEMU instalado no demuestra que exista una VM Windows, imagen o licencia disponible.
 
 No se necesita MinGW ni compilar mkxp para preparar este overlay Ruby. Ruby del
 sistema sería útil para lint, pero no sustituye probar la DLL integrada de Windows.
 No se hizo instalación global alguna.
 
-## Comprobación de runtime pendiente
+## Comprobación de runtime
 
 Antes de dar el aislamiento por validado en ejecución:
 
@@ -107,5 +119,9 @@ Antes de dar el aislamiento por validado en ejecución:
 5. Mantener automatizables estas comprobaciones mediante el futuro adaptador/bot;
    no declarar pruebas de sincronización antes de implementar sesiones.
 
-Estas pruebas aún no se ejecutaron. El Hito 1 no comenzó. La infraestructura y
-los contratos están listos para continuarlo una vez atendido el control de runtime.
+Se verificó bajo Wine: preload, guardado, cierre y recarga de client01; creación
+de guardado de client02 sin cambiar el hash del primero. El verificador estático
+`verify` indica `SEE_SEPARATE_RUNTIME_REPORTS` porque no observa la interfaz del
+juego; los resultados de ejecución están en `local/reports/`. Falta repetir en
+Windows x64 nativo, probar varios clientes simultáneos y automatizar el flujo de
+interfaz. El Hito 1 no comenzó.

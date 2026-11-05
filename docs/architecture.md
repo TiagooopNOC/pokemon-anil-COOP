@@ -25,7 +25,8 @@ de aislamiento de pruebas.
   ([binding-mri.cpp, commit d13f35c](https://github.com/mkxp-z/mkxp-z/blob/d13f35c/binding/binding-mri.cpp)).
   `dataPathOrg` y `dataPathApp` controlan el directorio de preferencias
   ([config.cpp del mismo commit](https://github.com/mkxp-z/mkxp-z/blob/d13f35c/src/config.cpp)).
-  El uso de este mecanismo en el ejecutable instalado sigue pendiente de prueba.
+El preload ya se observó en el ejecutable instalado bajo Wine; Windows nativo
+todavía no se probó.
 
 ## Aislamiento implementado en Hito 0
 
@@ -43,12 +44,15 @@ de guardado. Se crean las carpetas antes de arrancar para evitar el fallback.
 Cada cliente dispone también de APPDATA, LOCALAPPDATA y un directorio de prefijo Wine
 distintos. Cambiar variables APPDATA por sí solo no garantiza que todas las APIs de
 Windows redirijan sus carpetas conocidas: la protección no depende solo de eso.
-El runtime debe demostrar dónde escribe. No se han abierto ni migrado saves reales.
+El runtime escribió dos partidas desechables en perfiles privados bajo Wine.
+No se abrieron ni migraron partidas personales.
 
 El lanzador nativo usa el GameSlot de Co-op Anything, sin incluir su código en el
 paquete. Reserva los cuatro slots para un conjunto elegido de clientes y renueva la
-reserva. Solo registra/termina procesos hijos propios. Para Wine falta validar el
-adaptador de identidad de procesos; el lanzamiento automático está bloqueado ahí.
+reserva. Solo registra/termina procesos hijos propios. Bajo Wine se usó
+`tools/wine_smoke.py`: GameSlot reservó los slots y el runner cerró únicamente sus
+procesos y prefijo privado. GameSlot no puede verificar identidad de PID Windows
+en Linux; por eso no se delegó en él la limpieza de procesos Wine.
 
 ## Componentes previstos para hitos posteriores
 
