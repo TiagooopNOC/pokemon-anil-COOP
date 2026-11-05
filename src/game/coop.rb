@@ -9,6 +9,7 @@ end
 module AnilCoop
   @peers = {}
   @sprites = {}
+  @trainer_states = {}
   @sequence = 0
   @buffer = +""
   @out = +""
@@ -46,11 +47,57 @@ module AnilCoop
     @out << JSON.generate(message) << "\n"
   end
 
+  def self.connected?
+    !!(@socket && @id)
+  end
+
+  def self.qa_trainer
+    return unless ENV["ANIL_COOP_QA_TRAINER"] == "1" && @id && !@qa_trainer_created
+    @qa_trainer_created = true
+    event_id = 9000
+    return if $game_map.events[event_id]
+    x, y = $game_player.x + 1, $game_player.y
+    event = RPG::Event.new(x, y)
+    event.id = event_id
+    event.name = "trainer(1) Co-op QA"
+    page = event.pages[0]
+    page.trigger = 0
+    page.graphic.character_name = $game_player.character_name
+    Compiler.push_script(page.list, 'TrainerBattle.start(:AZUL1, "Azul", 1)')
+    Compiler.push_end(page.list)
+    game_event = Game_Event.new($game_map.map_id, event, $game_map)
+    $game_map.events[event_id] = game_event
+    $scene.spriteset.character_sprites.push(Sprite_Character.new(Spriteset_Map.viewport, game_event))
+    log("qa trainer map=#{$game_map.map_id} event=#{event_id} x=#{x} y=#{y}")
+  rescue StandardError => e
+    log("qa trainer error #{e.class}: #{e.message}")
+  end
+
+  def self.qa_provision
+    species = ENV["ANIL_COOP_QA_STARTER"]
+    return unless species && @id && !@qa_provisioned
+    @qa_provisioned = true
+    if $player.able_pokemon_count == 0
+      pbAddPokemonSilent(species.to_sym, 7)
+      $bag.add(:POKEBALL, 20)
+    end
+    if ENV["ANIL_COOP_QA_RANDOMLOCKE"] == "1" && !RandomizedChallenge.enabled?
+      RandomizedChallenge.enable
+      $PokemonGlobal.challenge_rules = [:PERMAFAINT, :ONE_CAPTURE]
+      ChallengeModes.begin_challenge
+    end
+    saved = Game.save("Partida 1")
+    log("qa provision species=#{$player.party[0]&.species} random=#{RandomizedChallenge.enabled?} locke=#{ChallengeModes.on?} saved=#{saved}")
+  rescue StandardError => e
+    log("qa provision error #{e.class}: #{e.message}")
+  end
+
   def self.disconnect
     @socket&.close rescue nil
     @socket = nil
     @id = nil
     @peers.clear
+    @trainer_states.clear
     clear_sprites
     log("disconnected")
   end
@@ -80,9 +127,18 @@ module AnilCoop
         sprite.dispose unless sprite.disposed?
       end
       log("peer left #{message["id"]}")
+    when "trainer_state"
+      @trainer_states[[message["map"], message["event"]]] = message
+      log("trainer state map=#{message["map"]} event=#{message["event"]} phase=#{message["phase"]} players=#{message["participants"].length}")
+    when "trainer_closed"
+      @trainer_states.delete([message["map"], message["event"]])
     when "error"
       log("server error #{message["reason"]}")
-      disconnect
+      if message["reason"].to_s.start_with?("trainer_") || message["reason"] == "coop_battle_pending"
+        @trainer_error = message["reason"]
+      else
+        disconnect
+      end
     end
   end
 
@@ -134,13 +190,79 @@ module AnilCoop
       temporary_pokemon = Pokemon.new(:BULBASAUR, 7)
       $player.party << temporary_pokemon
     end
-    log("qa wild begin")
+    first = $player.party[0]
+    log("qa wild begin party=#{first&.species} level=#{first&.level} exp=#{first&.exp} count=#{$player.party.length} random=#{RandomizedChallenge.enabled?} locke=#{ChallengeModes.on?}")
     result = WildBattle.start(:RATTATA, 3)
-    log("qa wild end result=#{result}")
+    first = $player.party[0]
+    log("qa wild end result=#{result} party=#{first&.species} level=#{first&.level} exp=#{first&.exp} count=#{$player.party.length}")
   rescue StandardError => e
     log("qa wild error #{e.class}: #{e.message}")
   ensure
     $player.party.delete(temporary_pokemon) if temporary_pokemon
+  end
+
+  def self.trainer_send(type, event, extra = {})
+    queue({ type: type, map: event.map_id, event: event.id }.merge(extra))
+    network
+  end
+
+  def self.trainer_wait_for(event, phase = nil)
+    deadline = Time.now.to_f + 5
+    loop do
+      Graphics.update
+      Input.update
+      network
+      state = @trainer_states[[event.map_id, event.id]]
+      return state if state && (!phase || state["phase"] == phase)
+      return nil if !@socket || @trainer_error || Time.now.to_f >= deadline
+    end
+  end
+
+  def self.trainer_lobby(event, forced)
+    key = [event.map_id, event.id]
+    @trainer_states.delete(key)
+    @trainer_error = nil
+    trainer_send("trainer_wait", event, forced: forced)
+    state = trainer_wait_for(event, "pending")
+    return yield if !state && forced
+    return false if !state
+    loop do
+      network
+      state = @trainer_states[key]
+      return forced ? yield : false if !state
+      me = state["participants"].find { |p| p["id"] == @id }
+      return forced ? yield : false if !me
+      return forced ? yield : false if state["phase"] != "pending"
+      host = state["host"] == @id
+      lines = state["participants"].map { |p| "#{p["name"]}: #{p["ready"] ? "listo" : "esperando"}" }
+      commands = [me["ready"] ? "No estoy listo" : "Estoy listo", "Actualizar"]
+      commands += ["Confirmar con listos", "Combatir solo"] if host
+      commands << (forced ? "Seguir esperando" : "Salir de la espera")
+      choice = pbMessage("Entrenador en espera.\n#{lines.join(" / ")}", commands, -1) { network }
+      if choice == 0
+        trainer_send("trainer_ready", event, ready: !me["ready"])
+      elsif choice == 1
+        next
+      elsif host && (choice == 2 || choice == 3)
+        solo = choice == 3
+        @trainer_error = nil
+        trainer_send("trainer_start", event, solo: solo)
+        locked = trainer_wait_for(event, "locked")
+        if locked && locked["participants"].any? { |p| p["id"] == @id }
+          log("trainer solo start map=#{event.map_id} event=#{event.id}")
+          begin
+            return yield
+          ensure
+            trainer_send("trainer_finish", event) if @socket
+          end
+        end
+        pbMessage("Combate cooperativo pendiente. El grupo queda preparado para la siguiente fase.") if @trainer_error == "coop_battle_pending"
+      elsif !forced && (choice == commands.length - 1 || choice == -1)
+        trainer_send("trainer_cancel", event)
+        @trainer_states.delete(key)
+        return false
+      end
+    end
   end
 
   def self.tick(scene)
@@ -213,6 +335,8 @@ class Scene_Map
   alias_method :anil_coop_base_update, :update
   def update
     anil_coop_base_update
+    AnilCoop.qa_provision
+    AnilCoop.qa_trainer
     AnilCoop.qa_wild if AnilCoop.qa_wild_ready?
   end
 end
@@ -222,5 +346,16 @@ class Battle::Scene
   def pbUpdate(cw = nil)
     anil_coop_base_pbUpdate(cw)
     AnilCoop.battle_tick
+  end
+end
+
+class << TrainerBattle
+  alias_method :anil_coop_base_start, :start
+  def start(*args)
+    return anil_coop_base_start(*args) unless ENV["ANIL_COOP_SESSION"] && AnilCoop.connected?
+    return anil_coop_base_start(*args) unless pbMapInterpreterRunning?
+    event = pbMapInterpreter.get_self
+    return anil_coop_base_start(*args) unless event && event.name[/trainer\(\d+\)/i]
+    AnilCoop.trainer_lobby(event, event.trigger == 2) { anil_coop_base_start(*args) }
   end
 end

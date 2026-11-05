@@ -118,6 +118,34 @@ class SessionServerTests(unittest.TestCase):
         self.assertEqual(self.receive(game)["reason"], "auth_failed")
         self.assertNotIn("BRIDGE2", module.STATE.rooms)
 
+    def test_trainer_wait_ready_forced_and_solo_lock(self):
+        a, b = self.client(), self.client()
+        host = self.exchange(a, {"type": "create", "session": "TRAIN01", "name": "host"})
+        guest = self.exchange(b, {"type": "join", "session": "TRAIN01", "name": "guest"})
+        self.receive(a)
+        pos = {"type": "position", "map": 28, "x": 5, "y": 5, "direction": 2,
+               "pattern": 0, "seq": 0, "sprite": "trainer"}
+        a.sendall((json.dumps(pos) + "\n").encode())
+        self.receive(b)
+        b.sendall((json.dumps(pos) + "\n").encode())
+        self.receive(a)
+        wait = {"type": "trainer_wait", "map": 28, "event": 10, "forced": True}
+        state = self.exchange(a, wait)
+        self.assertEqual((state["host"], state["phase"]), (host["id"], "pending"))
+        self.receive(b)
+        self.assertEqual(self.exchange(a, {"type": "trainer_cancel", "map": 28, "event": 10})["reason"], "trainer_forced")
+        self.assertEqual(self.exchange(b, dict(wait, forced=False))["participants"][-1]["id"], guest["id"])
+        self.receive(a)
+        state = self.exchange(b, {"type": "trainer_ready", "map": 28, "event": 10, "ready": True})
+        self.assertTrue(state["participants"][-1]["ready"])
+        self.receive(a)
+        self.assertEqual(self.exchange(a, {"type": "trainer_start", "map": 28, "event": 10, "solo": False})["reason"], "coop_battle_pending")
+        locked = self.exchange(a, {"type": "trainer_start", "map": 28, "event": 10, "solo": True})
+        self.assertEqual((locked["phase"], len(locked["participants"])), ("locked", 1))
+        self.assertEqual(self.receive(b)["phase"], "locked")
+        self.assertEqual(self.exchange(b, wait)["reason"], "trainer_locked")
+        self.assertEqual(self.exchange(a, {"type": "trainer_finish", "map": 28, "event": 10})["type"], "trainer_closed")
+
 
 if __name__ == "__main__":
     unittest.main()

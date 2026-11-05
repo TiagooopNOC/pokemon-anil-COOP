@@ -54,7 +54,7 @@ class State:
                 if kind == "create":
                     if code in self.rooms:
                         return {"type": "error", "reason": "session_exists"}, None
-                    self.rooms[code] = {"members": {}, "next_slot": 1}
+                    self.rooms[code] = {"members": {}, "next_slot": 1, "trainers": {}}
                 room = self.rooms.get(code)
                 if not room:
                     return {"type": "error", "reason": "no_session"}, None
@@ -107,7 +107,81 @@ class State:
                 return None, identity
             if kind == "ping":
                 return {"type": "pong"}, identity
+            if kind == "trainer_wait":
+                map_id, event_id, forced = message.get("map"), message.get("event"), message.get("forced")
+                if type(map_id) is not int or type(event_id) is not int or type(forced) is not bool or not 1 <= map_id <= 9999 or not 1 <= event_id <= 9999:
+                    return {"type": "error", "reason": "invalid_trainer"}, identity
+                if not player["position"] or player["position"]["map"] != map_id:
+                    return {"type": "error", "reason": "trainer_map_mismatch"}, identity
+                key = f"{map_id}:{event_id}"
+                encounter = room["trainers"].get(key)
+                if encounter and encounter["phase"] != "pending":
+                    return {"type": "error", "reason": "trainer_locked"}, identity
+                if not encounter:
+                    encounter = {"map": map_id, "event": event_id, "host": player_id,
+                                 "phase": "pending", "participants": {}}
+                    room["trainers"][key] = encounter
+                encounter["participants"][player_id] = {"ready": False, "forced": forced}
+                return self.trainer_notify(room, encounter, sock), identity
+            if kind in ("trainer_ready", "trainer_cancel", "trainer_start", "trainer_finish"):
+                map_id, event_id = message.get("map"), message.get("event")
+                if type(map_id) is not int or type(event_id) is not int:
+                    return {"type": "error", "reason": "invalid_trainer"}, identity
+                key = f"{map_id}:{event_id}"
+                encounter = room["trainers"].get(key)
+                if not encounter or player_id not in encounter["participants"]:
+                    return {"type": "error", "reason": "no_trainer_wait"}, identity
+                if kind == "trainer_finish":
+                    if encounter["phase"] != "locked" or player_id != encounter["host"]:
+                        return {"type": "error", "reason": "trainer_not_started"}, identity
+                    del room["trainers"][key]
+                    self.broadcast(room, {"type": "trainer_closed", "map": map_id, "event": event_id})
+                    return {"type": "trainer_closed", "map": map_id, "event": event_id}, identity
+                if encounter["phase"] != "pending":
+                    return {"type": "error", "reason": "trainer_locked"}, identity
+                if kind == "trainer_ready":
+                    if type(message.get("ready")) is not bool:
+                        return {"type": "error", "reason": "invalid_ready"}, identity
+                    encounter["participants"][player_id]["ready"] = message["ready"]
+                    return self.trainer_notify(room, encounter, sock), identity
+                if kind == "trainer_cancel":
+                    if encounter["participants"][player_id]["forced"]:
+                        return {"type": "error", "reason": "trainer_forced"}, identity
+                    del encounter["participants"][player_id]
+                    if not encounter["participants"]:
+                        del room["trainers"][key]
+                        self.broadcast(room, {"type": "trainer_closed", "map": map_id, "event": event_id})
+                        return {"type": "trainer_closed", "map": map_id, "event": event_id}, identity
+                    if encounter["host"] == player_id:
+                        encounter["host"] = next(iter(encounter["participants"]))
+                    return self.trainer_notify(room, encounter, sock), identity
+                if player_id != encounter["host"]:
+                    return {"type": "error", "reason": "trainer_not_host"}, identity
+                if type(message.get("solo")) is not bool:
+                    return {"type": "error", "reason": "invalid_trainer_start"}, identity
+                selected = [player_id]
+                if not message["solo"]:
+                    selected += [pid for pid, entry in encounter["participants"].items()
+                                 if pid != player_id and entry["ready"]]
+                if len(selected) != 1:
+                    return {"type": "error", "reason": "coop_battle_pending"}, identity
+                encounter["phase"] = "locked"
+                encounter["participants"] = {player_id: encounter["participants"][player_id]}
+                return self.trainer_notify(room, encounter, sock), identity
             return {"type": "error", "reason": "unknown_type"}, identity
+
+    @staticmethod
+    def trainer_public(room, encounter):
+        return {"type": "trainer_state", "map": encounter["map"], "event": encounter["event"],
+                "phase": encounter["phase"], "host": encounter["host"],
+                "participants": [{"id": pid, "name": room["members"][pid]["name"],
+                                  "ready": entry["ready"], "forced": entry["forced"]}
+                                 for pid, entry in encounter["participants"].items()]}
+
+    def trainer_notify(self, room, encounter, except_sock):
+        state = self.trainer_public(room, encounter)
+        self.broadcast(room, state, except_sock=except_sock)
+        return state
 
     @staticmethod
     def public(player):
@@ -135,6 +209,17 @@ class State:
                 player["sock"] = None
                 player["position"] = None
                 self.broadcast(room, {"type": "leave", "id": player["id"]})
+                for key, encounter in list(room["trainers"].items()):
+                    if player["id"] not in encounter["participants"]:
+                        continue
+                    del encounter["participants"][player["id"]]
+                    if not encounter["participants"]:
+                        del room["trainers"][key]
+                        self.broadcast(room, {"type": "trainer_closed", "map": encounter["map"], "event": encounter["event"]})
+                    else:
+                        if encounter["host"] == player["id"]:
+                            encounter["host"] = next(iter(encounter["participants"]))
+                        self.broadcast(room, self.trainer_public(room, encounter))
 
 
 STATE = State()

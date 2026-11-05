@@ -342,6 +342,9 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path) -> dict:
             run_env.pop("WINEPREFIX", None)
             run_env.pop("ANIL_COOP_SECRET", None)
             run_env.pop("ANIL_COOP_QA_WILD", None)
+            run_env.pop("ANIL_COOP_QA_TRAINER", None)
+            run_env.pop("ANIL_COOP_QA_STARTER", None)
+            run_env.pop("ANIL_COOP_QA_RANDOMLOCKE", None)
             process = subprocess.Popen(client["command"], cwd=client["cwd"], env=run_env,
                                        stdout=handle, stderr=subprocess.STDOUT)
             processes.append(process)
