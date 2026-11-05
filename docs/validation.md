@@ -110,3 +110,14 @@ roster cerrado al iniciar, formatos original/2v2/3v3/dos 2v2, doble victoria,
 reintentos por pareja y duplicación mínima del equipo enemigo efectivo. Persisten
 decisiones posteriores sobre balance de XP, mezcla de modalidades, excepciones de
 encuentros y recuperación de campaña. Nada de eso se presenta como implementado.
+
+## Combates salvajes individuales — 2026-11-05
+
+En dos copias aisladas bajo Wine, `client01` mantuvo abierto un combate salvaje
+durante más de un minuto mientras `client02` caminó y siguió viendo su personaje.
+Tras huir, ambos volvieron a verse en el mapa sin reconexión. Una segunda ejecución
+mostró dos combates salvajes simultáneos. Los guardados de las copias mantuvieron
+sus SHA-256 anteriores; no se tocó la instalación original. Las partidas de prueba
+aún no tenían Pokémon inicial, por lo que el escenario de QA agregó uno temporal
+solo en memoria. Capturas, experiencia y Randomlocke no se comprobaron en juego;
+la arquitectura los deja en cada proceso y guardado individual.

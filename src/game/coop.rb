@@ -1,4 +1,4 @@
-# Local prototype: ephemeral map presence only. Never serialized into a save.
+# Presence prototype: only trainer coordinates cross the network; wild battles stay local.
 require "socket"
 require "json"
 
@@ -13,6 +13,7 @@ module AnilCoop
   @buffer = +""
   @out = +""
   @last_send = 0.0
+  @last_ping = 0.0
   @last_connect = 0.0
   @map = nil
 
@@ -108,6 +109,40 @@ module AnilCoop
     disconnect
   end
 
+  # Battle runs inside the same game process but stops Scene_Map updates.
+  # Keep the last map position alive while this player's battle remains local.
+  def self.battle_tick
+    return unless ENV["ANIL_COOP_SESSION"] && $game_map
+    connect
+    network
+    now = Time.now.to_f
+    if @socket && @id && now - @last_ping >= 10
+      @last_ping = now
+      queue(type: "ping")
+    end
+  end
+
+  def self.qa_wild_ready?
+    return false unless ENV["ANIL_COOP_QA_WILD"] == "1" && @id && !@qa_wild_started
+    @peers.values.any? { |peer| peer["position"].is_a?(Hash) && peer["position"]["map"] == $game_map.map_id }
+  end
+
+  def self.qa_wild
+    @qa_wild_started = true
+    temporary_pokemon = nil
+    if $player.able_pokemon_count == 0
+      temporary_pokemon = Pokemon.new(:BULBASAUR, 7)
+      $player.party << temporary_pokemon
+    end
+    log("qa wild begin")
+    result = WildBattle.start(:RATTATA, 3)
+    log("qa wild end result=#{result}")
+  rescue StandardError => e
+    log("qa wild error #{e.class}: #{e.message}")
+  ensure
+    $player.party.delete(temporary_pokemon) if temporary_pokemon
+  end
+
   def self.tick(scene)
     return unless ENV["ANIL_COOP_SESSION"] && $game_player && $game_map
     connect
@@ -169,9 +204,23 @@ class Scene_Map
     AnilCoop.tick(self)
   end
 
-  alias_method :anil_coop_base_dispose, :dispose
-  def dispose
+  alias_method :anil_coop_base_disposeSpritesets, :disposeSpritesets
+  def disposeSpritesets
     AnilCoop.clear_sprites
-    anil_coop_base_dispose
+    anil_coop_base_disposeSpritesets
+  end
+
+  alias_method :anil_coop_base_update, :update
+  def update
+    anil_coop_base_update
+    AnilCoop.qa_wild if AnilCoop.qa_wild_ready?
+  end
+end
+
+class Battle::Scene
+  alias_method :anil_coop_base_pbUpdate, :pbUpdate
+  def pbUpdate(cw = nil)
+    anil_coop_base_pbUpdate(cw)
+    AnilCoop.battle_tick
   end
 end

@@ -1,10 +1,12 @@
-# Pokémon Añil Co-op — prototipo de presencia local
+# Pokémon Añil Co-op — prototipo de presencia
 
-Prototipo local de 1 a 4 jugadores: cada cliente conserva su partida, ve a los
+Prototipo de 1 a 4 jugadores: cada cliente conserva su partida, ve a los
 demás en el mismo mapa y recibe sus posiciones, dirección y pasos. Probado con
-cuatro procesos reales de Pokémon Añil bajo Wine. Aún no sincroniza eventos,
-campaña ni combates. El servidor puede escuchar en loopback o en una IP privada
-de LAN/VPN; la conexión desde otra computadora se debe probar allí.
+cuatro procesos reales de Pokémon Añil bajo Wine. Los combates salvajes siguen
+siendo individuales mientras la presencia permanece conectada. Aún no sincroniza
+eventos, campaña ni combates contra entrenadores. El servidor puede escuchar
+en loopback o en una IP privada de LAN/VPN; la conexión desde otra computadora
+se debe probar allí.
 
 Para conectar dos computadoras, seguí la [guía LAN/VPN](docs/connect.md).
 

@@ -27,6 +27,7 @@ def main() -> int:
     parser.add_argument("--port", type=int)
     parser.add_argument("--host-client")
     parser.add_argument("--server-host", default="127.0.0.1")
+    parser.add_argument("--qa-wild-client", action="append", default=[])
     args = parser.parse_args()
     if os.name == "nt" or not shutil.which("wine") or not shutil.which("wineserver"):
         raise SafetyError("This smoke runner requires Linux and Wine")
@@ -36,6 +37,8 @@ def main() -> int:
     if args.client and args.clients:
         raise SafetyError("Choose --client or --clients")
     plan = launch_plan(ROOT, selected)["clients"]
+    if any(client not in selected for client in args.qa_wild_client):
+        raise SafetyError("--qa-wild-client must be one of the selected clients")
     if args.session is not None:
         if not args.session.isalnum() or not 6 <= len(args.session) <= 12 or not args.port or not 1 <= args.port <= 65535 or (args.host_client is not None and args.host_client not in selected):
             raise SafetyError("Valid --session, --port and optional --host-client required together")
@@ -85,6 +88,9 @@ def main() -> int:
             profile = Path(client["save_directory"]).parent
             output = profile / "logs" / f"{owner}.log"
             run_env = dict(os.environ, **client["environment"], WINEDEBUG="-all")
+            run_env.pop("ANIL_COOP_QA_WILD", None)
+            if client["client"] in args.qa_wild_client:
+                run_env["ANIL_COOP_QA_WILD"] = "1"
             if args.session:
                 bridge = Bridge(args.server_host, args.port, secret or LOCAL_SECRET)
                 bridges.append(bridge)
