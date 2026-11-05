@@ -21,3 +21,12 @@ module AnilCoopDev
     f.puts("time=#{Time.now.utc}")
   end
 end
+
+# Añil invokes mainFunction directly, without rgss_main. mkxp's postloadScript
+# therefore never fires. Load our map hook only after the original plugins finish.
+$anil_coop_late_trace = TracePoint.new(:return) do |event|
+  next unless event.method_id == :runPlugins && event.defined_class.to_s.include?("PluginManager")
+  $anil_coop_late_trace.disable
+  load "CoopDev/loader.rb" if File.file?("CoopDev/loader.rb")
+end
+$anil_coop_late_trace.enable
