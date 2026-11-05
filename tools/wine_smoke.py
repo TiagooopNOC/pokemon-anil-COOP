@@ -12,6 +12,9 @@ import time
 import uuid
 
 from h0 import ROOT, SafetyError, launch_plan, read_json, write_new
+sys.path.insert(0, str(ROOT))
+from src.client.bridge import Bridge, LOCAL_SECRET
+from src.server.session_server import private_bind
 
 
 def main() -> int:
@@ -23,6 +26,7 @@ def main() -> int:
     parser.add_argument("--session")
     parser.add_argument("--port", type=int)
     parser.add_argument("--host-client")
+    parser.add_argument("--server-host", default="127.0.0.1")
     args = parser.parse_args()
     if os.name == "nt" or not shutil.which("wine") or not shutil.which("wineserver"):
         raise SafetyError("This smoke runner requires Linux and Wine")
@@ -33,8 +37,18 @@ def main() -> int:
         raise SafetyError("Choose --client or --clients")
     plan = launch_plan(ROOT, selected)["clients"]
     if args.session is not None:
-        if not args.session.isalnum() or not 6 <= len(args.session) <= 12 or not args.port or not 1 <= args.port <= 65535 or args.host_client not in selected:
-            raise SafetyError("Valid --session, --port and --host-client required together")
+        if not args.session.isalnum() or not 6 <= len(args.session) <= 12 or not args.port or not 1 <= args.port <= 65535 or (args.host_client is not None and args.host_client not in selected):
+            raise SafetyError("Valid --session, --port and optional --host-client required together")
+    secret = os.environ.get("ANIL_COOP_SECRET")
+    if args.session:
+        try:
+            allowed_host = args.server_host == "localhost" or private_bind(args.server_host)
+        except ValueError:
+            allowed_host = False
+        if not allowed_host:
+            raise SafetyError("--server-host must be a private IPv4 address")
+    if args.session and args.server_host not in ("127.0.0.1", "localhost") and (not secret or len(secret) < 16):
+        raise SafetyError("Set ANIL_COOP_SECRET (at least 16 characters) for LAN/VPN")
     workspace = {p["client"]: p for p in read_json(ROOT / "local/workspace.json")["clients"]}
     for client in plan:
         profile = Path(client["save_directory"]).parent
@@ -42,6 +56,8 @@ def main() -> int:
         if (cfg.get("preloadScript") != ["CoopDev/isolate.rb"] or
                 cfg.get("dataPathApp") != workspace[client["client"]]["profile_id"] or
                 not (Path(client["cwd"]) / "CoopDev/isolate.rb").is_file() or
+                not (Path(client["cwd"]) / "CoopDev/coop.rb").is_file() or
+                not (Path(client["cwd"]) / "CoopDev/loader.rb").is_file() or
                 (profile / "profile-id.txt").read_text().strip() != workspace[client["client"]]["profile_id"]):
             raise SafetyError("Client isolation preflight failed")
         marker = profile / "bootstrap-loaded.txt"
@@ -62,6 +78,7 @@ def main() -> int:
                        env=slot_env, check=True, capture_output=True, text=True)
     slot("acquire", "--exclusive", "--ttl", str(args.seconds + 120), "--wait", "0")
     processes = []
+    bridges = []
     result_path = ROOT / "local/reports" / f"{owner}.json"
     try:
         for client in plan:
@@ -69,9 +86,13 @@ def main() -> int:
             output = profile / "logs" / f"{owner}.log"
             run_env = dict(os.environ, **client["environment"], WINEDEBUG="-all")
             if args.session:
-                run_env.update(ANIL_COOP_SESSION=args.session, ANIL_COOP_PORT=str(args.port),
+                bridge = Bridge(args.server_host, args.port, secret or LOCAL_SECRET)
+                bridges.append(bridge)
+                run_env.update(ANIL_COOP_SESSION=args.session, ANIL_COOP_PORT=str(bridge.port),
+                               ANIL_COOP_HOST="127.0.0.1",
                                ANIL_COOP_MODE="create" if client["client"] == args.host_client else "join",
                                ANIL_COOP_NAME=client["client"])
+            run_env.pop("ANIL_COOP_SECRET", None)
             with output.open("xb") as log:
                 process = subprocess.Popen(client["command"], cwd=client["cwd"], env=run_env,
                                            stdout=log, stderr=subprocess.STDOUT)
@@ -102,6 +123,8 @@ def main() -> int:
             prefix = client["environment"]["WINEPREFIX"]
             subprocess.run(["wineserver", "-k"], env=dict(os.environ, WINEPREFIX=prefix),
                            capture_output=True, timeout=15)
+        for bridge in bridges:
+            bridge.close()
         slot("release")
 
 

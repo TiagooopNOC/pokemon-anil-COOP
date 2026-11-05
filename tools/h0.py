@@ -301,9 +301,19 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path) -> dict:
     # Wine support is intentionally gated until its process/slot adapter is tested.
     # The final target is native Windows, for which gameslot has PID identity checks.
     if not doctor(repo)["native_windows_x64"]:
-        raise SafetyError("Runtime blocked: native Windows x64 required for --run; Wine adapter unvalidated")
-    verify(repo)
+        raise SafetyError("Runtime blocked: native Windows x64 required for this launcher")
     plan = launch_plan(repo, clients)
+    workspace = {p["client"]: p for p in read_json(repo / "local/workspace.json")["clients"]}
+    for client in plan["clients"]:
+        game = Path(client["cwd"])
+        profile = Path(client["save_directory"]).parent
+        cfg = read_json(game / "mkxp.json")
+        if (cfg.get("preloadScript") != ["CoopDev/isolate.rb"] or
+                cfg.get("dataPathApp") != workspace[client["client"]]["profile_id"] or
+                not (game / "CoopDev/isolate.rb").is_file() or
+                not profile.joinpath("saves").is_dir() or
+                profile.joinpath("profile-id.txt").read_text().strip() != workspace[client["client"]]["profile_id"]):
+            raise SafetyError("Client save isolation preflight failed")
     if not gameslot.is_file():
         raise SafetyError("Provide the reviewed coop-anything/tools/gameslot/gameslot.py")
     state = no_links(repo / "local/gameslot")
@@ -324,12 +334,13 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path) -> dict:
             profile = Path(client["save_directory"]).parent
             evidence = profile / "bootstrap-loaded.txt"
             if evidence.exists():
-                raise SafetyError("Previous bootstrap evidence exists: archive it before a new smoke run")
+                evidence.rename(profile / "logs" / ("bootstrap-previous-" + uuid.uuid4().hex + ".txt"))
             logfile = profile / "logs" / (owner + ".log")
             handle = logfile.open("xb")
             handles.append(handle)
             run_env = dict(os.environ, **client["environment"])
             run_env.pop("WINEPREFIX", None)
+            run_env.pop("ANIL_COOP_SECRET", None)
             process = subprocess.Popen(client["command"], cwd=client["cwd"], env=run_env,
                                        stdout=handle, stderr=subprocess.STDOUT)
             processes.append(process)
@@ -347,7 +358,7 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path) -> dict:
                    for c in plan["clients"]):
             raise SafetyError("Game exited without bootstrap evidence")
         return {"status": "BOOTSTRAP_OBSERVED", "exit_codes": codes,
-                "save_reload_test": "NOT_RUN", "cooperative_play": "NOT_IMPLEMENTED"}
+                "save_reload_test": "NOT_RUN", "cooperative_play": "PRESENCE_ONLY"}
     finally:
         # Only children created by this launcher. Never terminate games by image name.
         for process in processes:

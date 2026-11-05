@@ -3,7 +3,10 @@
 Prototipo local de 1 a 4 jugadores: cada cliente conserva su partida, ve a los
 demás en el mismo mapa y recibe sus posiciones, dirección y pasos. Probado con
 cuatro procesos reales de Pokémon Añil bajo Wine. Aún no sincroniza eventos,
-campaña ni combates; el servidor escucha solo en `127.0.0.1`.
+campaña ni combates. El servidor puede escuchar en loopback o en una IP privada
+de LAN/VPN; la conexión desde otra computadora se debe probar allí.
+
+Para conectar dos computadoras, seguí la [guía LAN/VPN](docs/connect.md).
 
 ## Probar en Linux Mint
 
@@ -63,8 +66,8 @@ python3 -B tools/h0.py package
 
 `prepare` se ejecuta una sola vez: rechaza sobrescribir clientes existentes.
 `launch` sin `--run` **solo muestra un plan**. No abre el juego ni sockets.
-`package` crea un ZIP de herramientas propias. El prototipo aún requiere copias
-locales del juego y un servidor en la misma computadora.
+`package` crea un ZIP de herramientas propias. El prototipo requiere una copia
+local del juego por computadora y un servidor en una IP privada de LAN/VPN.
 
 En Windows usar `py -3` en lugar de `python3` o los scripts PowerShell de
 `packaging/windows/`. La ejecución nativa requiere el `gameslot.py` revisado de
@@ -80,5 +83,6 @@ Co-op Anything. Ver instrucciones y límites en [Hito 0](docs/hito-0.md).
 
 El arranque del preload y el ciclo guardar/cerrar/cargar se comprobaron bajo Wine.
 Dos copias crearon guardados privados distintos. La integración visual de hasta
-cuatro clientes se comprobó bajo Wine; Windows x64 nativo e Internet siguen
-pendientes de validar e implementar, respectivamente.
+cuatro clientes se comprobó bajo Wine. La conexión por IP privada se comprobó
+con dos juegos en una computadora; faltan las pruebas entre dos computadoras y
+en Windows x64 nativo.

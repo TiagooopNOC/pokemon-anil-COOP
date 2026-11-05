@@ -1,6 +1,10 @@
-"""Local-only JSON-lines presence server. Python standard library only."""
+"""Private-network JSON-lines presence server. Python standard library only."""
 import argparse
+import hashlib
+import hmac
+import ipaddress
 import json
+import os
 import re
 import secrets
 import socketserver
@@ -12,6 +16,22 @@ MAX_PLAYERS = 4
 VALID_CODE = re.compile(r"[A-Z0-9]{6,12}\Z")
 VALID_NAME = re.compile(r"[\w -]{1,24}\Z", re.UNICODE)
 VALID_SPRITE = re.compile(r"[\w -]{1,80}\Z", re.UNICODE)
+LOCAL_SECRET = "local-development-only"
+
+
+def private_bind(address):
+    ip = ipaddress.ip_address(address)
+    networks = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")
+    return ip.version == 4 and (
+        ip.is_loopback or any(ip in ipaddress.ip_network(n) for n in networks))
+
+
+def proof(secret, nonce, message):
+    fields = (nonce, message.get("type", ""), message.get("session", ""),
+              message.get("name", ""), message.get("resume", ""))
+    if not all(isinstance(x, str) for x in fields):
+        return None
+    return hmac.new(secret.encode(), "\n".join(fields).encode(), hashlib.sha256).hexdigest()
 
 
 class State:
@@ -124,7 +144,9 @@ class Handler(socketserver.StreamRequestHandler):
     def handle(self):
         identity = None
         self.connection.settimeout(30)
+        nonce = secrets.token_hex(16)
         try:
+            self.wfile.write((json.dumps({"type": "challenge", "nonce": nonce}) + "\n").encode())
             while True:
                 line = self.rfile.readline(MAX_LINE + 1)
                 if not line:
@@ -136,9 +158,21 @@ class Handler(socketserver.StreamRequestHandler):
                 except (ValueError, UnicodeError):
                     self.wfile.write(b'{"type":"error","reason":"bad_json"}\n')
                     continue
+                if identity is None:
+                    if not isinstance(message, dict) or message.get("type") not in ("create", "join"):
+                        self.wfile.write(b'{"type":"error","reason":"auth_required"}\n')
+                        break
+                    expected = proof(self.server.secret, nonce, message)
+                    provided = message.get("proof")
+                    if not expected or not isinstance(provided, str) or not hmac.compare_digest(provided, expected):
+                        self.wfile.write(b'{"type":"error","reason":"auth_failed"}\n')
+                        break
+                    nonce = None
                 response, identity = STATE.handle(self.connection, message, identity)
                 if response is not None:
                     self.wfile.write((json.dumps(response, separators=(",", ":")) + "\n").encode())
+                    if identity is None and nonce is None:
+                        break
         except (OSError, TimeoutError):
             pass
         finally:
@@ -149,12 +183,26 @@ class Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     daemon_threads = True
 
+    def __init__(self, address, handler=Handler, secret=LOCAL_SECRET):
+        self.secret = secret
+        super().__init__(address, handler)
+
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--bind", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()
-    with Server(("127.0.0.1", args.port), Handler) as server:
+    try:
+        allowed = private_bind(args.bind)
+    except ValueError:
+        allowed = False
+    if not allowed:
+        parser.error("--bind must be an explicit loopback, LAN or private VPN IPv4 address")
+    secret = os.environ.get("ANIL_COOP_SECRET")
+    if not ipaddress.ip_address(args.bind).is_loopback and (not secret or len(secret) < 16):
+        parser.error("ANIL_COOP_SECRET must contain at least 16 characters on a LAN/VPN")
+    with Server((args.bind, args.port), Handler, secret or LOCAL_SECRET) as server:
         print(server.server_address[1], flush=True)
         server.serve_forever()
 

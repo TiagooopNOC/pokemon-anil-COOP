@@ -3,7 +3,8 @@ import socket
 import threading
 import unittest
 
-from src.server.session_server import Server, Handler, State
+from src.server.session_server import Server, Handler, State, proof, private_bind
+from src.client.bridge import Bridge
 import src.server.session_server as module
 
 
@@ -14,6 +15,7 @@ class SessionServerTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.sockets = []
+        self.challenges = {}
 
     def tearDown(self):
         for sock in self.sockets:
@@ -26,6 +28,7 @@ class SessionServerTests(unittest.TestCase):
         sock = socket.create_connection(self.server.server_address)
         sock.settimeout(2)
         self.sockets.append(sock)
+        self.challenges[sock] = self.receive(sock)["nonce"]
         return sock
 
     @staticmethod
@@ -35,10 +38,11 @@ class SessionServerTests(unittest.TestCase):
             line += sock.recv(1)
         return json.loads(line)
 
-    @classmethod
-    def exchange(cls, sock, payload):
+    def exchange(self, sock, payload):
+        if payload.get("type") in ("create", "join"):
+            payload = dict(payload, proof=proof(module.LOCAL_SECRET, self.challenges[sock], payload))
         sock.sendall((json.dumps(payload) + "\n").encode())
-        return cls.receive(sock)
+        return self.receive(sock)
 
     def test_create_join_four_limit_and_reconnect(self):
         clients = [self.client() for _ in range(5)]
@@ -55,7 +59,7 @@ class SessionServerTests(unittest.TestCase):
             if module.STATE.rooms["ABC123"]["members"][first["id"]]["sock"] is None:
                 break
             threading.Event().wait(.01)
-        resumed = self.exchange(clients[4], {"type": "join", "session": "ABC123", "name": "one", "resume": first["resume"]})
+        resumed = self.exchange(self.client(), {"type": "join", "session": "ABC123", "name": "one", "resume": first["resume"]})
         self.assertEqual((resumed["id"], resumed["slot"]), (first["id"], 1))
 
     def test_position_validation_and_delivery(self):
@@ -73,6 +77,46 @@ class SessionServerTests(unittest.TestCase):
         invalid = dict(valid, seq=1, x=True)
         self.assertEqual(self.exchange(a, invalid)["reason"], "invalid_position")
         self.assertEqual(self.exchange(a, {"type": "position", "map": 1})["reason"], "invalid_position")
+
+    def test_auth_and_private_binding(self):
+        self.assertTrue(private_bind("127.0.0.1"))
+        self.assertTrue(private_bind("192.168.1.10"))
+        self.assertTrue(private_bind("100.101.10.5"))
+        self.assertFalse(private_bind("0.0.0.0"))
+        self.assertFalse(private_bind("8.8.8.8"))
+        self.assertFalse(private_bind("fc00::1"))
+        with self.assertRaises(ValueError):
+            Bridge("8.8.8.8", 17641, module.LOCAL_SECRET)
+        sock = self.client()
+        sock.sendall(b'{"type":"create","session":"ABC123","name":"one","proof":"bad"}\n')
+        self.assertEqual(self.receive(sock)["reason"], "auth_failed")
+        self.assertFalse(module.STATE.rooms)
+
+    def test_bridge_authenticates_without_exposing_secret_to_game(self):
+        bridge = Bridge("127.0.0.1", self.server.server_address[1], module.LOCAL_SECRET)
+        self.addCleanup(bridge.close)
+        game = socket.create_connection(("127.0.0.1", bridge.port))
+        self.sockets.append(game)
+        game.sendall(b'{"type":"create","session":"BRIDGE1","name":"host"}\n')
+        welcome = self.receive(game)
+        self.assertEqual(welcome["type"], "welcome")
+        self.assertEqual(welcome["slot"], 1)
+        game.sendall(b'{"type":"position","map":28,"x":2,"y":3,"direction":2,"pattern":0,"seq":0,"sprite":"trainer"}\n')
+        for _ in range(50):
+            if module.STATE.rooms["BRIDGE1"]["members"][welcome["id"]]["position"]:
+                break
+            threading.Event().wait(.01)
+        self.assertEqual(module.STATE.rooms["BRIDGE1"]["members"][welcome["id"]]["position"]["x"], 2)
+
+    def test_bridge_rejects_wrong_shared_secret(self):
+        bridge = Bridge("127.0.0.1", self.server.server_address[1], "wrong-secret-for-test")
+        self.addCleanup(bridge.close)
+        game = socket.create_connection(("127.0.0.1", bridge.port))
+        self.sockets.append(game)
+        game.settimeout(2)
+        game.sendall(b'{"type":"create","session":"BRIDGE2","name":"host"}\n')
+        self.assertEqual(self.receive(game)["reason"], "auth_failed")
+        self.assertNotIn("BRIDGE2", module.STATE.rooms)
 
 
 if __name__ == "__main__":
