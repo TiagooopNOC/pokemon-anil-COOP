@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "label": "Anil folder v4.14 / Settings 4.1.1 / Essentials 21.1",
+  "engine": "mkxp-z 2.4.2/d13f35c, Windows x64, Ruby 3.1.3",
+  "critical": {
+    "Game.exe": "3f5680f7cadc864c91bbbf747c71f45daa703d3b6af8343e18fa367e90d96988",
+    "Game.ini": "ff9e9173f04944328778fab6e2d88b305f4799905aca127fe5bd955b034a0e2c",
+    "mkxp.json": "ac714ba871906269a58068903ba1dc1719c84dfe80ff9dd822ae42d1d6e17045",
+    "Data/Scripts.rxdata": "e276de98e8ac8e8577968cd4b9c981cfb74e93c4dd598446cfcc219977f50831",
+    "Data/PluginScripts.rxdata": "aa1a2afd4003063b7c650c840b15d20dc9eee0cc95ba66ab0041395e739a3c5e",
+    "x64-msvcrt-ruby310.dll": "8d6c1df80b309d339670c6aa95d1c342d8d6975ebbc7562db88cce404a35e327"
+  }
+}

@@ -1,0 +1,17 @@
+/local/
+/dist/
+/.venv/
+__pycache__/
+*.py[cod]
+*.log
+# Game, saves and third-party binaries never belong in this repository.
+*.exe
+*.dll
+*.rxdata
+*.png
+*.jpg
+*.ogg
+*.mp3
+*.wav
+*.sf2
+*.zip
