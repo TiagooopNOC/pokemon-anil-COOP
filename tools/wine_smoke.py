@@ -31,7 +31,8 @@ def main() -> int:
     parser.add_argument("--qa-trainer", action="store_true")
     parser.add_argument("--qa-2v2", action="store_true", help="Experimental NPC fixture, temporary teams, no rewards/saves")
     parser.add_argument("--qa-battle-bot", choices=("engine", "visual"))
-    parser.add_argument("--qa-scenario", choices=("basic", "status", "switch", "loss", "disconnect", "desync", "rewards"), default="basic")
+    parser.add_argument("--personal-team", action="store_true")
+    parser.add_argument("--qa-scenario", choices=("basic", "status", "switch", "loss", "disconnect", "desync", "rewards", "personal", "personal-reserves"), default="basic")
     parser.add_argument("--qa-starter", action="append", default=[], metavar="CLIENT:SPECIES")
     parser.add_argument("--qa-randomlocke", action="append", default=[], metavar="CLIENT")
     args = parser.parse_args()
@@ -115,6 +116,9 @@ def main() -> int:
             run_env.pop("ANIL_COOP_QA_2V2", None)
             run_env.pop("ANIL_COOP_QA_BOT", None)
             run_env.pop("ANIL_COOP_QA_SCENARIO", None)
+            run_env.pop("ANIL_COOP_PERSONAL_TEAM", None)
+            if args.personal_team or args.qa_scenario.startswith("personal"):
+                run_env["ANIL_COOP_PERSONAL_TEAM"] = "1"
             if args.qa_battle_bot:
                 run_env.update(ANIL_COOP_QA_BOT=args.qa_battle_bot, ANIL_COOP_QA_SCENARIO=args.qa_scenario)
             if args.qa_2v2:

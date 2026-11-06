@@ -189,3 +189,15 @@ un rival temporal con Salpicadura; el escenario `basic` conserva el combate norm
 ventanas de estadísticas, repetición sin EXP adicional y regreso a ambos mapas
 con conexión/posición remota. Guardados intactos. Reporte privado:
 `anil-wine-30ea781146fc4b01a1f5a91865ed7db8.json`.
+
+### Selección personal 1–3 — 2026-11-06
+
+`TEAM001`: los iniciales reales de client03/client04 (Normal/Randomlocke), uno por
+jugador, completaron seis rondas en dos motores Wine sin escena gráfica; 35 EXP
+propios y regreso conectado. `TEAM002`: escenario explícitamente sintético en RAM,
+seis Pokémon por perfil, seleccionados [2,0,4], completó 3+3 con cambio voluntario
+y sustitución por debilitamiento. No agrega Pokémon al usar el mod normalmente.
+Guardados intactos en ambas pruebas. 17 tests específicos pasaron, incluyendo
+selección validada, propiedad de reservas y dos recorridos TCP. Menú humano y
+lanzadores Windows nuevos todavía pendientes de prueba. Historia individual es
+el requisito vigente; ningún interruptor de campaña se envía al servidor.

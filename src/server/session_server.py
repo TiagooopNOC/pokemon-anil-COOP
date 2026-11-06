@@ -1,5 +1,6 @@
 """Private-network JSON-lines presence server. Python standard library only."""
 import argparse
+import copy
 import hashlib
 import hmac
 import ipaddress
@@ -12,11 +13,11 @@ import threading
 import time
 
 if __package__:
-    from .coop_battle import BattleExchange, PROTOTYPE
+    from .coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, validate_team, validate_trainer
 else:
-    from coop_battle import BattleExchange, PROTOTYPE
+    from coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, validate_team, validate_trainer
 
-MAX_LINE = 4096
+MAX_LINE = 32768  # Bounded personal-team snapshots; no binary game objects.
 MAX_PLAYERS = 4
 VALID_CODE = re.compile(r"[A-Z0-9]{6,12}\Z")
 VALID_NAME = re.compile(r"[\w -]{1,24}\Z", re.UNICODE)
@@ -140,7 +141,7 @@ class State:
                     return {"type": "error", "reason": "trainer_map_mismatch"}, identity
                 key = f"{map_id}:{event_id}"
                 prototype = message.get("prototype")
-                if prototype not in (None, PROTOTYPE) or (prototype and event_id != 9000):
+                if prototype not in (None, PROTOTYPE, PERSONAL_PROTOTYPE) or (prototype and event_id != 9000):
                     return {"type": "error", "reason": "trainer_prototype"}, identity
                 if any(player_id in e["participants"] and k != key for k, e in room["trainers"].items()):
                     return {"type": "error", "reason": "trainer_busy"}, identity
@@ -153,7 +154,7 @@ class State:
                     room["trainers"][key] = encounter
                 encounter["participants"][player_id] = {"ready": False, "forced": forced, "prototype": prototype}
                 return self.trainer_notify(room, encounter, sock), identity
-            if kind in ("trainer_ready", "trainer_cancel", "trainer_start", "trainer_finish"):
+            if kind in ("trainer_team", "trainer_ready", "trainer_cancel", "trainer_start", "trainer_finish"):
                 map_id, event_id = message.get("map"), message.get("event")
                 if type(map_id) is not int or type(event_id) is not int:
                     return {"type": "error", "reason": "invalid_trainer"}, identity
@@ -171,10 +172,24 @@ class State:
                     return {"type": "trainer_closed", "map": map_id, "event": event_id}, identity
                 if encounter["phase"] != "pending":
                     return {"type": "error", "reason": "trainer_locked"}, identity
+                if kind == "trainer_team":
+                    entry = encounter["participants"][player_id]
+                    if entry.get("prototype") != PERSONAL_PROTOTYPE:
+                        return {"type": "error", "reason": "trainer_prototype"}, identity
+                    if not validate_team(message.get("team")) or not validate_trainer(message.get("trainer")):
+                        return {"type": "error", "reason": "invalid_trainer_team"}, identity
+                    entry["team"] = copy.deepcopy(message["team"])
+                    entry["trainer"] = copy.deepcopy(message["trainer"])
+                    entry["ready"] = False
+                    return self.trainer_notify(room, encounter, sock), identity
                 if kind == "trainer_ready":
                     if type(message.get("ready")) is not bool:
                         return {"type": "error", "reason": "invalid_ready"}, identity
-                    encounter["participants"][player_id]["ready"] = message["ready"]
+                    entry = encounter["participants"][player_id]
+                    if (message["ready"] and entry.get("prototype") == PERSONAL_PROTOTYPE and
+                            not entry.get("team")):
+                        return {"type": "error", "reason": "trainer_team_required"}, identity
+                    entry["ready"] = message["ready"]
                     return self.trainer_notify(room, encounter, sock), identity
                 if kind == "trainer_cancel":
                     if encounter["participants"][player_id]["forced"]:
@@ -196,31 +211,59 @@ class State:
                     selected += [pid for pid, entry in encounter["participants"].items()
                                  if pid != player_id and entry["ready"]]
                 if len(selected) != 1:
+                    prototype = encounter["participants"][player_id].get("prototype")
                     if (len(selected) != 2 or event_id != 9000 or
+                            prototype not in (PROTOTYPE, PERSONAL_PROTOTYPE) or
                             any(not encounter["participants"][pid]["ready"] or
-                                encounter["participants"][pid].get("prototype") != PROTOTYPE
+                                encounter["participants"][pid].get("prototype") != prototype
                                 for pid in selected)):
                         return {"type": "error", "reason": "coop_battle_pending"}, identity
-                    encounter["battle"] = BattleExchange(selected)
+                    sizes = (2, 2)
+                    if prototype == PERSONAL_PROTOTYPE:
+                        if any(not encounter["participants"][pid].get("team") for pid in selected):
+                            return {"type": "error", "reason": "trainer_team_required"}, identity
+                        sizes = tuple(len(encounter["participants"][pid]["team"]) for pid in selected)
+                    encounter["prototype"] = prototype
+                    encounter["battle"] = BattleExchange(selected, sizes)
                 encounter["phase"] = "locked"
                 encounter["participants"] = {pid: encounter["participants"][pid] for pid in selected}
                 return self.trainer_notify(room, encounter, sock), identity
             return {"type": "error", "reason": "unknown_type"}, identity
 
     @staticmethod
-    def trainer_public(room, encounter):
-        return {"type": "trainer_state", "map": encounter["map"], "event": encounter["event"],
+    def trainer_public(room, encounter, recipient=None):
+        state = {"type": "trainer_state", "map": encounter["map"], "event": encounter["event"],
                 "phase": encounter["phase"], "host": encounter["host"],
                 "battle": encounter["battle"].id if encounter.get("battle") else None,
                 "seed": encounter["battle"].seed if encounter.get("battle") else None,
                 "participants": [{"id": pid, "name": room["members"][pid]["name"],
-                                  "ready": entry["ready"], "forced": entry["forced"]}
+                                  "ready": entry["ready"], "forced": entry["forced"],
+                                  "team_count": len(entry.get("team", []))}
                                  for pid, entry in encounter["participants"].items()]}
+        if encounter.get("battle"):
+            state["prototype"] = encounter["prototype"]
+            state["team_sizes"] = list(encounter["battle"].team_sizes)
+            if (encounter["prototype"] == PERSONAL_PROTOTYPE and
+                    recipient in encounter["participants"]):
+                state["selected_teams"] = [entry["team"] for entry in encounter["participants"].values()]
+                state["selected_trainers"] = [entry["trainer"] for entry in encounter["participants"].values()]
+        return state
 
     def trainer_notify(self, room, encounter, except_sock):
-        state = self.trainer_public(room, encounter)
-        self.broadcast(room, state, except_sock=except_sock)
-        return state
+        response = None
+        for pid, peer in room["members"].items():
+            sock = peer["sock"]
+            if sock is None:
+                continue
+            state = self.trainer_public(room, encounter, pid)
+            if sock is except_sock:
+                response = state
+            else:
+                try:
+                    sock.sendall((json.dumps(state, separators=(",", ":")) + "\n").encode())
+                except OSError:
+                    pass
+        return response
 
     @staticmethod
     def battle_notify(room, encounter, message):
@@ -300,7 +343,7 @@ class Handler(socketserver.StreamRequestHandler):
                     break
                 try:
                     message = json.loads(line)
-                except (ValueError, UnicodeError):
+                except (ValueError, UnicodeError, RecursionError):
                     self.wfile.write(b'{"type":"error","reason":"bad_json"}\n')
                     continue
                 if identity is None:

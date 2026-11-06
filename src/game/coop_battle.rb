@@ -98,6 +98,7 @@ module AnilCoop
     # Trusted local copies protect personal objects even if a plugin accesses globals.
     originals = [$player, $PokemonGlobal, $bag, $stats]
     $player, $PokemonGlobal, $bag, $stats = Marshal.load(Marshal.dump(originals))
+    personal = state["prototype"] == "personal2v2-v1"
     names = state["participants"].map { |p| p["name"] }
     # Use the current, known valid trainer type for both test trainers.
     trainers = names.map { |n| NPCTrainer.new(n, $player.trainer_type) }
@@ -106,11 +107,31 @@ module AnilCoop
           test_pokemon(:SQUIRTLE, trainers[0], 1002, [:TACKLE, :TAILWHIP], :TORRENT),
           test_pokemon(:CHARMANDER, trainers[1], 2001, [:SCRATCH, :GROWL], :BLAZE),
           test_pokemon(:SQUIRTLE, trainers[1], 2002, [:TACKLE, :TAILWHIP], :TORRENT)]
-    trainers[0].party = p1[0, 2]
-    trainers[1].party = p1[2, 2]
+    team_sizes = [2, 2]
+    if personal
+      local_owner = state["participants"].index { |p| p["id"] == @id }
+      supplied = state.fetch("selected_teams").fetch(local_owner)
+      current = supplied.map { |p| team_snapshot(originals[0].party.fetch(p["slot"]), p["slot"]) }
+      raise BattleStopped, "El equipo cambió durante la espera" unless supplied == @selected_team && supplied == current
+      team_sizes = state.fetch("selected_teams").map(&:length)
+      trainers = state.fetch("selected_trainers").map do |data|
+        raise BattleStopped, "Entrenador incompatible" unless GameData::TrainerType.exists?(data["trainer_type"])
+        t = NPCTrainer.new(data["name"], data["trainer_type"].to_sym)
+        t.id, t.language = data["id"], data["language"]
+        t
+      end
+      p1 = state["selected_teams"].flatten.map { |data| team_pokemon(data) }
+    end
+    trainers[0].party = p1[0, team_sizes[0]]
+    trainers[1].party = p1[team_sizes[0], team_sizes[1]]
     foe = NPCTrainer.new("Azul QA", :AZUL1)
     foe.id = 300
     enemy = test_pokemon(:CHARMANDER, foe, 3001, [:SCRATCH, :GROWL], :BLAZE)
+    if personal
+      enemy.level = 5
+      enemy.calc_stats
+      enemy.heal
+    end
     # Clone trusted local data: HP, PP and effects of the duplicate are independent.
     p2 = [enemy, Marshal.load(Marshal.dump(enemy))]
     p2[1].personalID = 3002
@@ -118,9 +139,9 @@ module AnilCoop
     foe.party = p2
     scene ||= BattleCreationHelperMethods.create_battle_scene
     local_index = state["participants"].index { |p| p["id"] == @id } * 2
-    battle = AnilCoopBattle.new(scene, p1, p2, trainers, [foe], local_index, state["seed"])
+    battle = AnilCoopBattle.new(scene, p1, p2, trainers, [foe], local_index, state["seed"], team_sizes: team_sizes, personal: personal)
     battle_barrier("setup", battle.coop_digest)
-    log("2v2 begin owned=#{local_index} temporary_teams=true")
+    log("2v2 begin owned=#{local_index} temporary_teams=#{!personal}")
     battle_error = nil
     run = proc do
       begin
@@ -157,12 +178,14 @@ module AnilCoop
 end
 
 class AnilCoopBattle < Battle
-  def initialize(scene, allies, foes, trainers, opponents, local_index, seed)
+  def initialize(scene, allies, foes, trainers, opponents, local_index, seed, team_sizes: [2, 2], personal: false)
     @coop_local = local_index
+    @coop_team_sizes = team_sizes
+    @coop_personal = personal
     super(scene, allies, foes, trainers, opponents)
     # Original Añil/LBDSKY map metadata, environment, weather and battle background.
     BattleCreationHelperMethods.prepare_battle(self)
-    @party1starts = [0, 2]
+    @party1starts = [0, team_sizes[0]]
     @party2starts = [0]
     setBattleMode("double")
     @internalBattle = @expGain = @moneyGain = @switchStyle = false
@@ -174,6 +197,11 @@ class AnilCoopBattle < Battle
     @coop_enemy_origins = [0, 0]
     @coop_defeated = {}
     @coop_rewards_applied = false
+  end
+
+  def coop_owned_indices
+    start = @party1starts[@coop_local / 2]
+    (start...start + @coop_team_sizes[@coop_local / 2]).to_a
   end
 
   def pbOwnedByPlayer?(index); index == @coop_local; end
@@ -193,7 +221,7 @@ class AnilCoopBattle < Battle
   end
 
   def pbPlayer
-    return @player[@coop_local / 2] if @coop_reward_owner
+    return (@coop_personal ? $player : @player[@coop_local / 2]) if @coop_reward_owner
     super
   end
 
@@ -204,7 +232,7 @@ class AnilCoopBattle < Battle
               !AnilCoop.instance_variable_get(:@battle_completed)
     @coop_rewards_applied = true # Never retry a partially applied local reward.
     @coop_reward_owner = true
-    owned = (@coop_local...@coop_local + 2).to_a
+    owned = coop_owned_indices
     before = @party1.map { |p| [p.exp, p.level] }
     other = @party1.each_index.to_a - owned
     remote_before = Marshal.dump(other.map { |i| @party1[i] })

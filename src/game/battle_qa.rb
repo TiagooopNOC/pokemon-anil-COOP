@@ -20,17 +20,33 @@ module AnilCoopQA
     save_data = SaveData.get_data_from_file(path) # no conversion/write-back
     SaveData.load_bootup_values(save_data)
     Game.load(save_data)
+    if scenario == "personal-reserves"
+      # Explicit synthetic six-slot QA party, only in RAM; never a fallback for users.
+      source = $player.party.fetch(0)
+      $player.party = Array.new(6) do |i|
+        p = Marshal.load(Marshal.dump(source))
+        p.personalID = (source.personalID + 10000 + i) % (2**32)
+        p.calc_stats
+        p.heal
+        p.hp = 1 if [0, 2].include?(i)
+        p
+      end
+      AnilCoop.log("QA synthetic six-slot party; selecting [2,0,4]")
+    end
     $game_player.refresh
     $scene.createSpritesets
     Graphics.transition(0) # Mirror Scene_Map.main's initialization in this driver.
     wait_until { AnilCoop.connected? && AnilCoop.instance_variable_get(:@peers).length == 1 }
     AnilCoop.qa_trainer
     event = $game_map.events.fetch(9000)
-    AnilCoop.trainer_send("trainer_wait", event, forced: false, prototype: "qa2v2-v1")
+    AnilCoop.trainer_send("trainer_wait", event, forced: false, prototype: AnilCoop.battle_prototype)
     key = [event.map_id, event.id]
     wait_until do
       state = AnilCoop.instance_variable_get(:@trainer_states)[key]
       state && state["participants"].any? { |p| p["id"] == AnilCoop.instance_variable_get(:@id) }
+    end
+    if AnilCoop.personal_team?
+      AnilCoop.trainer_send("trainer_team", event, team: AnilCoop.select_team(scenario == "personal-reserves" ? [2, 0, 4] : [0]), trainer: AnilCoop.trainer_snapshot)
     end
     AnilCoop.trainer_send("trainer_ready", event, ready: true)
     wait_until do
@@ -93,6 +109,8 @@ module AnilCoopQA
                       result[:save_unchanged] && result[:scene_map]
     elsif scenario == "status"
       result[:pass] &&= result.dig(:observed, :poison) && result.dig(:observed, :item_consumed)
+    elsif scenario == "personal-reserves"
+      result[:pass] &&= result.dig(:observed, :voluntary_switch) && result.dig(:observed, :forced_replacement)
     elsif scenario == "switch"
       result[:pass] &&= result.dig(:observed, :voluntary_switch)
     elsif scenario == "loss"
@@ -230,7 +248,7 @@ module AnilCoopQA
         bitmap.save_to_png(File.join(AnilCoopDev::PROFILE, "qa-2v2-battle.png"))
         bitmap.dispose
       end
-      return 2 if AnilCoopQA.scenario == "switch" && @turnCount == 0
+      return 2 if ["switch", "personal-reserves"].include?(AnilCoopQA.scenario) && @turnCount == 0
       0
     end
 

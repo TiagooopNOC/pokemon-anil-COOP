@@ -8,7 +8,7 @@ import threading
 
 from src.server.session_server import LOCAL_SECRET, private_bind
 
-MAX_LINE = 4096
+MAX_LINE = 32768  # Same bound as the server for selected-team snapshots.
 
 
 def proof(secret, nonce, message):

@@ -1,12 +1,14 @@
 # Requisitos aceptados
 
-Estado: especificación; ninguna mecánica cooperativa está implementada en Hito 0.
+Decisión vigente (2026-11-06): historias, entrenadores derrotados, medallas, eventos e inventarios individuales. La presencia es compartida; solo los participantes reciben el resultado cooperativo. No desarrollar campaña global.
+
+Prioridad actual: dos jugadores, selección temporal y ordenada de 1–3 Pokémon propios cada uno; solo seleccionados reciben EXP y efectos. Conservar hasta seis en cada equipo original, sin alterar no seleccionados. 3v3 y cuatro jugadores en combate quedan pospuestos; presencia de cuatro se conserva.
 
 ## Plataforma y propiedad
 
 - Desarrollo en Linux Mint; distribución y validación definitiva en Windows x64.
 - Sesiones por Internet de 1 a 4 jugadores en computadoras diferentes.
-- Misma historia y campaña compartida; cada jugador conserva personaje, equipo,
+- Historias independientes; cada jugador conserva personaje, equipo,
   inventario, guardados y reglas individuales. Nunca sustituir la partida de un
   invitado por la del anfitrión ni adoptar automáticamente su identidad.
 - Normal, Randomlocke y otras modalidades: compatibilidad por capacidad y reglas
@@ -28,7 +30,7 @@ Estado: especificación; ninguna mecánica cooperativa está implementada en Hit
 5. Los no participantes siguen explorando; no se admite incorporarse a una batalla
    iniciada. No reutilizar `$game_temp.waiting_trainer`, que ya tiene otro propósito
    en el juego original.
-6. La victoria actualiza la campaña de forma coherente y exactamente una vez.
+6. La victoria actualiza exclusivamente las partidas participantes, exactamente una vez.
    Desconexiones, reintentos y reconexión no permiten duplicar recompensas.
 
 | Participantes al iniciar | Formato |

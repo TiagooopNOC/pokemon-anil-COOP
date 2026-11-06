@@ -3,7 +3,23 @@ import time
 import unittest
 
 from src.server.session_server import State
-from src.server.coop_battle import BattleExchange, PROTOTYPE
+from src.server.coop_battle import (BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE,
+                                    validate_team, validate_trainer)
+
+
+def personal_trainer():
+    return dict(id=100, name="Owner", gender=0, language=2, trainer_type="POKEMONTRAINER_Red")
+
+
+def personal_pokemon(slot=0):
+    return dict(key=f"100:{1000 + slot}", slot=slot, species="BULBASAUR", name="Bulbasaur",
+                level=10, exp=560, form=0, pid=1000 + slot,
+                owner=dict(id=100, name="Owner", gender=0, language=2), gender=0,
+                shiny=False, super_shiny=False, ability="OVERGROW", nature="HARDY",
+                nature_stats="HARDY", item=None, moves=[["TACKLE", 35, 0]], iv=[15] * 6,
+                ev=[0] * 6, maxed=[False] * 6, stats=[31, 20, 20, 20, 20, 20],
+                base_stats=[45, 49, 49, 65, 65, 45], types=["GRASS", "POISON"],
+                hp=31, status="NONE", status_count=0, happiness=70, pokerus=0, ball="POKEBALL")
 
 
 class Peer:
@@ -142,6 +158,99 @@ class BattleLobbyTests(unittest.TestCase):
         self.assertFalse(any(m["type"] == "battle_step" for m in self.peers[2].messages))
         self.assertEqual(self.call(0, "battle_step", battle=battle.id, seq=3, stage="result",
                                    digest="a" * 64)["reason"], "battle_not_participant")
+
+
+class PersonalSnapshotTests(unittest.TestCase):
+    def test_bounded_snapshot_and_identity(self):
+        self.assertTrue(validate_trainer(personal_trainer()))
+        self.assertTrue(validate_team([personal_pokemon(i) for i in (5, 2, 0)]))
+        self.assertFalse(validate_team([]))
+        self.assertFalse(validate_team([personal_pokemon(i) for i in range(4)]))
+        self.assertFalse(validate_team([personal_pokemon(), personal_pokemon()]))
+        for field, value in (("pid", True), ("hp", 32), ("slot", 6), ("key", "100:999"),
+                             ("species", "../../game"), ("iv", [31] * 7),
+                             ("moves", [["TACKLE", 256, 0]]), ("maxed", [0] * 6),
+                             ("extra", "untrusted"), ("owner", {"id": 100})):
+            pokemon = personal_pokemon()
+            pokemon[field] = value
+            self.assertFalse(validate_team([pokemon]), field)
+        trainer = personal_trainer()
+        trainer["id"] = True
+        self.assertFalse(validate_trainer(trainer))
+
+    def test_personal_ranges_reject_other_owner_and_unselected_slots(self):
+        battle = BattleExchange(["host", "guest"], (1, 3))
+        def step(player, stage, command=None):
+            return battle.submit(player, dict(battle=battle.id, seq=battle.seq,
+                                 stage=stage, digest="a" * 64, command=command))
+        step("host", "setup")
+        step("guest", "setup")
+        self.assertEqual(step("host", "turn", ["switch", 1, -1])[0], "battle_command")
+        self.assertEqual(step("guest", "turn", ["switch", 0, -1])[0], "battle_command")
+        self.assertEqual(step("guest", "turn", ["switch", 4, -1])[0], "battle_command")
+        step("host", "turn", ["move", 0, 1])
+        self.assertIsNone(step("guest", "turn", ["switch", 3, -1])[0])
+        step("host", "enemy", [["move", 0, 0], ["move", 0, 2]])
+        step("guest", "enemy")
+        self.assertEqual(step("guest", "switch", [2, 0])[0], "battle_command")
+        step("host", "switch", [2, -1])
+        self.assertEqual(step("guest", "switch", [2, 1])[1]["commands"], [[2, -1], [2, 1]])
+
+    def test_team_size_bounds(self):
+        for sizes in ((0, 1), (4, 1), (True, 1), (1,)):
+            with self.assertRaises(ValueError):
+                BattleExchange(["host", "guest"], sizes)
+
+
+class PersonalLobbyTests(unittest.TestCase):
+    call = BattleLobbyTests.call
+
+    def setUp(self):
+        BattleLobbyTests.setUp(self)
+        for i in (0, 1):
+            self.call(i, "trainer_wait", forced=False, prototype=PERSONAL_PROTOTYPE)
+
+    def team(self, player, slots=(0,)):
+        return self.call(player, "trainer_team", team=[personal_pokemon(i) for i in slots],
+                         trainer=personal_trainer())
+
+    def test_confirm_both_freeze_and_keep_snapshots_private(self):
+        self.assertEqual(self.call(0, "trainer_ready", ready=True)["reason"], "trainer_team_required")
+        self.assertEqual(self.call(0, "trainer_team", team=[personal_pokemon()])["reason"], "invalid_trainer_team")
+        self.team(0)
+        self.team(1, (5, 2, 0))
+        for i in (0, 1):
+            self.call(i, "trainer_ready", ready=True)
+        state = self.call(0, "trainer_start", solo=False)
+        self.assertEqual(state["prototype"], PERSONAL_PROTOTYPE)
+        self.assertEqual(state["team_sizes"], [1, 3])
+        self.assertEqual([p["slot"] for p in state["selected_teams"][1]], [5, 2, 0])
+        self.assertEqual(len(state["selected_trainers"]), 2)
+        guest = self.peers[1].messages[-1]
+        self.assertEqual(guest["selected_teams"], state["selected_teams"])
+        spectator = self.peers[2].messages[-1]
+        self.assertNotIn("selected_teams", spectator)
+        self.assertNotIn("selected_trainers", spectator)
+        self.assertEqual([p["team_count"] for p in spectator["participants"]], [1, 3])
+        self.assertEqual(self.team(1)["reason"], "trainer_locked")
+
+    def test_changes_revoke_ready_and_selection_is_copied(self):
+        team = [personal_pokemon()]
+        self.call(0, "trainer_team", team=team, trainer=personal_trainer())
+        team[0]["hp"] = 1
+        entry = self.state.rooms["BATTLE1"]["trainers"]["28:9000"]["participants"][self.ids[0][1]]
+        self.assertEqual(entry["team"][0]["hp"], 31)
+        self.call(0, "trainer_ready", ready=True)
+        state = self.team(0, (1, 3))
+        self.assertFalse(state["participants"][0]["ready"])
+        self.assertEqual(state["participants"][0]["team_count"], 2)
+
+    def test_solo_and_nonparticipants(self):
+        self.assertEqual(self.team(2)["reason"], "no_trainer_wait")
+        state = self.call(0, "trainer_start", solo=True)
+        self.assertEqual(state["phase"], "locked")
+        self.assertIsNone(state["battle"])
+        self.assertNotIn("selected_teams", state)
 
 
 if __name__ == "__main__":

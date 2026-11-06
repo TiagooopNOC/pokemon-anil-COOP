@@ -171,7 +171,7 @@ module AnilCoop
       break if chunk == :wait_readable
       raise EOFError if chunk.nil? || chunk.empty?
       @buffer << chunk
-      raise "oversize network message" if @buffer.bytesize > 16384
+      raise "oversize network message" if @buffer.bytesize > 65536
       while (index = @buffer.index("\n"))
         line = @buffer.slice!(0..index)
         receive(JSON.parse(line))
@@ -247,7 +247,7 @@ module AnilCoop
     @trainer_states.delete(key)
     @trainer_error = nil
     extras = { forced: forced }
-    extras[:prototype] = "qa2v2-v1" if respond_to?(:qa_2v2?) && qa_2v2? && event.id == 9000
+    extras[:prototype] = battle_prototype if respond_to?(:qa_2v2?) && qa_2v2? && event.id == 9000
     trainer_send("trainer_wait", event, extras)
     state = trainer_wait_for(event, "pending")
     return yield if !state && forced
@@ -261,13 +261,17 @@ module AnilCoop
       return start_qa_battle(state) if state["phase"] == "locked" && state["battle"]
       return forced ? yield : false if state["phase"] != "pending"
       host = state["host"] == @id
-      lines = state["participants"].map { |p| "#{p["name"]}: #{p["ready"] ? "listo" : "esperando"}" }
+      lines = state["participants"].map { |p| "#{p["name"]}: #{p["ready"] ? "listo" : "esperando"} (#{p["team_count"] || 0})" }
       commands = [me["ready"] ? "No estoy listo" : "Estoy listo", "Actualizar"]
       commands += ["Confirmar con listos", "Combatir solo"] if host
+      commands << "Elegir Pokémon" if personal_team?
       commands << (forced ? "Seguir esperando" : "Salir de la espera")
       choice = pbMessage("Entrenador en espera.\n#{lines.join(" / ")}", commands, -1) { network }
       next if @trainer_states[key] && @trainer_states[key]["phase"] != "pending"
-      if choice == 0
+      if personal_team? && choice == commands.length - 2
+        choose_team(event)
+      elsif choice == 0
+        next if personal_team? && !me["ready"] && me.fetch("team_count", 0) == 0 && !choose_team(event)
         trainer_send("trainer_ready", event, ready: !me["ready"])
       elsif choice == 1
         next

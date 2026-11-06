@@ -45,6 +45,7 @@ def main():
             if not previous.exists():
                 shutil.copy2(battle_target, previous)
         shutil.copy2(ROOT / "src/game/coop_battle.rb", battle_target)
+        shutil.copy2(ROOT / "src/game/coop_team.rb", game / "CoopDev/coop_team.rb")
         shutil.copy2(ROOT / "src/game/battle_qa.rb", game / "CoopDev/battle_qa.rb")
         shutil.copy2(loader, game / "CoopDev/loader.rb")
         # Añil does not call rgss_main, so mkxp's postloadScript never runs.
