@@ -119,5 +119,17 @@ Tras huir, ambos volvieron a verse en el mapa sin reconexión. Una segunda ejecu
 mostró dos combates salvajes simultáneos. Los guardados de las copias mantuvieron
 sus SHA-256 anteriores; no se tocó la instalación original. Las partidas de prueba
 aún no tenían Pokémon inicial, por lo que el escenario de QA agregó uno temporal
-solo en memoria. Capturas, experiencia y Randomlocke no se comprobaron en juego;
-la arquitectura los deja en cada proceso y guardado individual.
+solo en memoria. En esa ejecución no se probaron captura, experiencia ni
+Randomlocke; las pruebas posteriores figuran abajo.
+
+## Espera NPC y perfiles con iniciales — 2026-11-05
+
+Antes de la interrupción, dos clientes bajo Wine hablaron con el mismo NPC de
+prueba, se prepararon y confirmaron el grupo; el invitado salió de la espera y
+siguió caminando. El anfitrión inició solo el combate normal contra Azul y se
+rechazó una incorporación tardía. `client03` guardó y recargó Bulbasaur en Normal;
+`client04` guardó y recargó Charmander en Randomlocke. En combates salvajes
+simultáneos apareció Rattata frente a Wooper, respectivamente. Los SHA-256 de
+ambos guardados permanecen iguales tras cerrar las pruebas incompletas.
+Captura, experiencia y evolución aún requieren acciones manuales en el juego;
+la automatización de entrada fue rechazada por la revisión del entorno.

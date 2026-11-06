@@ -77,10 +77,12 @@ module AnilCoop
     species = ENV["ANIL_COOP_QA_STARTER"]
     return unless species && @id && !@qa_provisioned
     @qa_provisioned = true
-    if $player.able_pokemon_count == 0
-      pbAddPokemonSilent(species.to_sym, 7)
-      $bag.add(:POKEBALL, 20)
+    if !$player.party.empty?
+      log("qa provision skipped: existing party")
+      return
     end
+    pbAddPokemonSilent(species.to_sym, 7)
+    $bag.add(:POKEBALL, 20)
     if ENV["ANIL_COOP_QA_RANDOMLOCKE"] == "1" && !RandomizedChallenge.enabled?
       RandomizedChallenge.enable
       $PokemonGlobal.challenge_rules = [:PERMAFAINT, :ONE_CAPTURE]

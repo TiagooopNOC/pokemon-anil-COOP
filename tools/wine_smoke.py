@@ -42,6 +42,8 @@ def main() -> int:
     plan = launch_plan(ROOT, selected)["clients"]
     if any(client not in selected for client in args.qa_wild_client):
         raise SafetyError("--qa-wild-client must be one of the selected clients")
+    if any(":" not in entry for entry in args.qa_starter):
+        raise SafetyError("--qa-starter requires CLIENT:SPECIES")
     starters = dict(entry.split(":", 1) for entry in args.qa_starter)
     if any(client not in selected or species not in ("BULBASAUR", "CHARMANDER", "SQUIRTLE") for client, species in starters.items()):
         raise SafetyError("--qa-starter requires selected CLIENT:BULBASAUR|CHARMANDER|SQUIRTLE")
