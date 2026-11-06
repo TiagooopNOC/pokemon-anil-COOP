@@ -11,6 +11,11 @@ import socketserver
 import threading
 import time
 
+if __package__:
+    from .coop_battle import BattleExchange, PROTOTYPE
+else:
+    from coop_battle import BattleExchange, PROTOTYPE
+
 MAX_LINE = 4096
 MAX_PLAYERS = 4
 VALID_CODE = re.compile(r"[A-Z0-9]{6,12}\Z")
@@ -89,6 +94,26 @@ class State:
             player = room["members"].get(player_id) if room else None
             if not player or player["sock"] is not sock:
                 return {"type": "error", "reason": "invalid_session"}, None
+            for key, encounter in list(room["trainers"].items()):
+                if encounter.get("battle") and time.monotonic() > encounter["battle"].deadline:
+                    self.battle_close(room, key, "battle_timeout")
+            if kind in ("battle_step", "battle_abort"):
+                found = next(((k, e) for k, e in room["trainers"].items()
+                              if e.get("battle") and e["battle"].id == message.get("battle")), None)
+                if not found or player_id not in found[1]["battle"].players:
+                    return {"type": "error", "reason": "battle_not_participant"}, identity
+                key, encounter = found
+                if kind == "battle_abort":
+                    self.battle_close(room, key, "battle_cancelled")
+                    return None, identity
+                error, packet = encounter["battle"].submit(player_id, message)
+                if error:
+                    self.battle_close(room, key, error)
+                elif packet:
+                    self.battle_notify(room, encounter, packet)
+                    if packet["stage"] == "result":
+                        self.battle_close(room, key, None)
+                return None, identity
             if kind == "position":
                 keys = ("map", "x", "y", "direction", "pattern", "seq")
                 if any(type(message.get(k)) is not int for k in keys):
@@ -114,6 +139,11 @@ class State:
                 if not player["position"] or player["position"]["map"] != map_id:
                     return {"type": "error", "reason": "trainer_map_mismatch"}, identity
                 key = f"{map_id}:{event_id}"
+                prototype = message.get("prototype")
+                if prototype not in (None, PROTOTYPE) or (prototype and event_id != 9000):
+                    return {"type": "error", "reason": "trainer_prototype"}, identity
+                if any(player_id in e["participants"] and k != key for k, e in room["trainers"].items()):
+                    return {"type": "error", "reason": "trainer_busy"}, identity
                 encounter = room["trainers"].get(key)
                 if encounter and encounter["phase"] != "pending":
                     return {"type": "error", "reason": "trainer_locked"}, identity
@@ -121,7 +151,7 @@ class State:
                     encounter = {"map": map_id, "event": event_id, "host": player_id,
                                  "phase": "pending", "participants": {}}
                     room["trainers"][key] = encounter
-                encounter["participants"][player_id] = {"ready": False, "forced": forced}
+                encounter["participants"][player_id] = {"ready": False, "forced": forced, "prototype": prototype}
                 return self.trainer_notify(room, encounter, sock), identity
             if kind in ("trainer_ready", "trainer_cancel", "trainer_start", "trainer_finish"):
                 map_id, event_id = message.get("map"), message.get("event")
@@ -132,6 +162,8 @@ class State:
                 if not encounter or player_id not in encounter["participants"]:
                     return {"type": "error", "reason": "no_trainer_wait"}, identity
                 if kind == "trainer_finish":
+                    if encounter.get("battle"):
+                        return {"type": "error", "reason": "trainer_battle_active"}, identity
                     if encounter["phase"] != "locked" or player_id != encounter["host"]:
                         return {"type": "error", "reason": "trainer_not_started"}, identity
                     del room["trainers"][key]
@@ -164,9 +196,14 @@ class State:
                     selected += [pid for pid, entry in encounter["participants"].items()
                                  if pid != player_id and entry["ready"]]
                 if len(selected) != 1:
-                    return {"type": "error", "reason": "coop_battle_pending"}, identity
+                    if (len(selected) != 2 or event_id != 9000 or
+                            any(not encounter["participants"][pid]["ready"] or
+                                encounter["participants"][pid].get("prototype") != PROTOTYPE
+                                for pid in selected)):
+                        return {"type": "error", "reason": "coop_battle_pending"}, identity
+                    encounter["battle"] = BattleExchange(selected)
                 encounter["phase"] = "locked"
-                encounter["participants"] = {player_id: encounter["participants"][player_id]}
+                encounter["participants"] = {pid: encounter["participants"][pid] for pid in selected}
                 return self.trainer_notify(room, encounter, sock), identity
             return {"type": "error", "reason": "unknown_type"}, identity
 
@@ -174,6 +211,8 @@ class State:
     def trainer_public(room, encounter):
         return {"type": "trainer_state", "map": encounter["map"], "event": encounter["event"],
                 "phase": encounter["phase"], "host": encounter["host"],
+                "battle": encounter["battle"].id if encounter.get("battle") else None,
+                "seed": encounter["battle"].seed if encounter.get("battle") else None,
                 "participants": [{"id": pid, "name": room["members"][pid]["name"],
                                   "ready": entry["ready"], "forced": entry["forced"]}
                                  for pid, entry in encounter["participants"].items()]}
@@ -182,6 +221,24 @@ class State:
         state = self.trainer_public(room, encounter)
         self.broadcast(room, state, except_sock=except_sock)
         return state
+
+    @staticmethod
+    def battle_notify(room, encounter, message):
+        data = (json.dumps(message, separators=(",", ":")) + "\n").encode()
+        for pid in encounter["battle"].players:
+            sock = room["members"][pid]["sock"]
+            if sock:
+                try:
+                    sock.sendall(data)
+                except OSError:
+                    pass
+
+    def battle_close(self, room, key, reason):
+        encounter = room["trainers"].pop(key)
+        if reason:
+            self.battle_notify(room, encounter, {"type": "battle_abort",
+                               "battle": encounter["battle"].id, "reason": reason})
+        self.broadcast(room, {"type": "trainer_closed", "map": encounter["map"], "event": encounter["event"]})
 
     @staticmethod
     def public(player):
@@ -211,6 +268,9 @@ class State:
                 self.broadcast(room, {"type": "leave", "id": player["id"]})
                 for key, encounter in list(room["trainers"].items()):
                     if player["id"] not in encounter["participants"]:
+                        continue
+                    if encounter.get("battle"):
+                        self.battle_close(room, key, "battle_disconnect")
                         continue
                     del encounter["participants"][player["id"]]
                     if not encounter["participants"]:

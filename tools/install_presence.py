@@ -39,6 +39,12 @@ def main():
             if not previous.exists():
                 shutil.copy2(target, previous)
         shutil.copy2(source, target)
+        battle_target = game / "CoopDev/coop_battle.rb"
+        if battle_target.exists():
+            previous = profile / "logs" / ("battle-previous-" + digest(battle_target)[:12] + ".rb")
+            if not previous.exists():
+                shutil.copy2(battle_target, previous)
+        shutil.copy2(ROOT / "src/game/coop_battle.rb", battle_target)
         shutil.copy2(loader, game / "CoopDev/loader.rb")
         # Añil does not call rgss_main, so mkxp's postloadScript never runs.
         # The preloaded isolation script triggers this loader after plugins run.

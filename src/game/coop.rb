@@ -52,23 +52,34 @@ module AnilCoop
   end
 
   def self.qa_trainer
-    return unless ENV["ANIL_COOP_QA_TRAINER"] == "1" && @id && !@qa_trainer_created
-    @qa_trainer_created = true
+    return unless ENV["ANIL_COOP_QA_TRAINER"] == "1" && @id
+    sprite_name = $game_player.character_name.to_s
+    return if sprite_name.empty?  # The player graphic may not be ready on first map frame.
+    @qa_trainer_anchor ||= [$game_map.map_id, $game_player.x + 1, $game_player.y]
+    return if @qa_trainer_anchor[0] != $game_map.map_id
     event_id = 9000
-    return if $game_map.events[event_id]
-    x, y = $game_player.x + 1, $game_player.y
+    if (existing = $game_map.events[event_id])
+      existing.character_name = sprite_name if existing.character_name.to_s.empty?
+      sprites = $scene.spriteset.character_sprites
+      unless sprites.any? { |s| !s.disposed? && s.character.equal?(existing) }
+        sprites.push(Sprite_Character.new(Spriteset_Map.viewport, existing))
+      end
+      return
+    end
+    _, x, y = @qa_trainer_anchor
     event = RPG::Event.new(x, y)
     event.id = event_id
     event.name = "trainer(1) Co-op QA"
     page = event.pages[0]
     page.trigger = 0
-    page.graphic.character_name = $game_player.character_name
+    page.graphic.character_name = sprite_name
+    page.graphic.character_hue = 120
     Compiler.push_script(page.list, 'TrainerBattle.start(:AZUL1, "Azul", 1)')
     Compiler.push_end(page.list)
     game_event = Game_Event.new($game_map.map_id, event, $game_map)
     $game_map.events[event_id] = game_event
     $scene.spriteset.character_sprites.push(Sprite_Character.new(Spriteset_Map.viewport, game_event))
-    log("qa trainer map=#{$game_map.map_id} event=#{event_id} x=#{x} y=#{y}")
+    log("qa trainer map=#{$game_map.map_id} event=#{event_id} x=#{x} y=#{y} sprite=#{sprite_name}")
   rescue StandardError => e
     log("qa trainer error #{e.class}: #{e.message}")
   end
@@ -95,6 +106,7 @@ module AnilCoop
   end
 
   def self.disconnect
+    @battle_failure = "connection lost" if @active_battle
     @socket&.close rescue nil
     @socket = nil
     @id = nil
@@ -134,9 +146,13 @@ module AnilCoop
       log("trainer state map=#{message["map"]} event=#{message["event"]} phase=#{message["phase"]} players=#{message["participants"].length}")
     when "trainer_closed"
       @trainer_states.delete([message["map"], message["event"]])
+    when "battle_step", "battle_abort"
+      battle_receive(message) if respond_to?(:battle_receive)
     when "error"
       log("server error #{message["reason"]}")
-      if message["reason"].to_s.start_with?("trainer_") || message["reason"] == "coop_battle_pending"
+      if message["reason"].to_s.start_with?("battle_")
+        @battle_failure = message["reason"] if @active_battle
+      elsif message["reason"].to_s.start_with?("trainer_") || message["reason"] == "coop_battle_pending"
         @trainer_error = message["reason"]
       else
         disconnect
@@ -220,11 +236,19 @@ module AnilCoop
     end
   end
 
+  def self.start_qa_battle(state)
+    # Development fixture only: reload between attempts, never during a battle.
+    load "CoopDev/coop_battle.rb" if qa_2v2?
+    qa_coop_battle(state)
+  end
+
   def self.trainer_lobby(event, forced)
     key = [event.map_id, event.id]
     @trainer_states.delete(key)
     @trainer_error = nil
-    trainer_send("trainer_wait", event, forced: forced)
+    extras = { forced: forced }
+    extras[:prototype] = "qa2v2-v1" if respond_to?(:qa_2v2?) && qa_2v2? && event.id == 9000
+    trainer_send("trainer_wait", event, extras)
     state = trainer_wait_for(event, "pending")
     return yield if !state && forced
     return false if !state
@@ -234,6 +258,7 @@ module AnilCoop
       return forced ? yield : false if !state
       me = state["participants"].find { |p| p["id"] == @id }
       return forced ? yield : false if !me
+      return start_qa_battle(state) if state["phase"] == "locked" && state["battle"]
       return forced ? yield : false if state["phase"] != "pending"
       host = state["host"] == @id
       lines = state["participants"].map { |p| "#{p["name"]}: #{p["ready"] ? "listo" : "esperando"}" }
@@ -241,6 +266,7 @@ module AnilCoop
       commands += ["Confirmar con listos", "Combatir solo"] if host
       commands << (forced ? "Seguir esperando" : "Salir de la espera")
       choice = pbMessage("Entrenador en espera.\n#{lines.join(" / ")}", commands, -1) { network }
+      next if @trainer_states[key] && @trainer_states[key]["phase"] != "pending"
       if choice == 0
         trainer_send("trainer_ready", event, ready: !me["ready"])
       elsif choice == 1
@@ -251,6 +277,7 @@ module AnilCoop
         trainer_send("trainer_start", event, solo: solo)
         locked = trainer_wait_for(event, "locked")
         if locked && locked["participants"].any? { |p| p["id"] == @id }
+          return start_qa_battle(locked) if locked["battle"]
           log("trainer solo start map=#{event.map_id} event=#{event.id}")
           begin
             return yield

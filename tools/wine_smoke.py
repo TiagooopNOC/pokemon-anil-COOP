@@ -29,6 +29,7 @@ def main() -> int:
     parser.add_argument("--server-host", default="127.0.0.1")
     parser.add_argument("--qa-wild-client", action="append", default=[])
     parser.add_argument("--qa-trainer", action="store_true")
+    parser.add_argument("--qa-2v2", action="store_true", help="Experimental NPC fixture, temporary teams, no rewards/saves")
     parser.add_argument("--qa-starter", action="append", default=[], metavar="CLIENT:SPECIES")
     parser.add_argument("--qa-randomlocke", action="append", default=[], metavar="CLIENT")
     args = parser.parse_args()
@@ -37,6 +38,8 @@ def main() -> int:
     if not 10 <= args.seconds <= 600:
         raise SafetyError("Run length must be 10..600 seconds")
     selected = args.clients or ([args.client] if args.client else [])
+    if args.qa_2v2 and (not args.qa_trainer or not args.session or len(selected) != 2):
+        raise SafetyError("--qa-2v2 requires --qa-trainer, --session and exactly two clients")
     if args.client and args.clients:
         raise SafetyError("Choose --client or --clients")
     plan = launch_plan(ROOT, selected)["clients"]
@@ -102,6 +105,9 @@ def main() -> int:
             run_env.pop("ANIL_COOP_QA_TRAINER", None)
             run_env.pop("ANIL_COOP_QA_STARTER", None)
             run_env.pop("ANIL_COOP_QA_RANDOMLOCKE", None)
+            run_env.pop("ANIL_COOP_QA_2V2", None)
+            if args.qa_2v2:
+                run_env["ANIL_COOP_QA_2V2"] = "1"
             if client["client"] in args.qa_wild_client:
                 run_env["ANIL_COOP_QA_WILD"] = "1"
             if args.qa_trainer:

@@ -297,7 +297,7 @@ def launch_plan(repo: Path, clients: list[str]) -> dict:
     return {"status": "PLAN_ONLY", "runtime": doctor(repo)["runtime"], "clients": result}
 
 
-def launch_windows(repo: Path, clients: list[str], gameslot: Path) -> dict:
+def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bool = False) -> dict:
     # Wine support is intentionally gated until its process/slot adapter is tested.
     # The final target is native Windows, for which gameslot has PID identity checks.
     if not doctor(repo)["native_windows_x64"]:
@@ -345,6 +345,9 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path) -> dict:
             run_env.pop("ANIL_COOP_QA_TRAINER", None)
             run_env.pop("ANIL_COOP_QA_STARTER", None)
             run_env.pop("ANIL_COOP_QA_RANDOMLOCKE", None)
+            run_env.pop("ANIL_COOP_QA_2V2", None)
+            if qa_2v2:
+                run_env.update(ANIL_COOP_QA_TRAINER="1", ANIL_COOP_QA_2V2="1")
             process = subprocess.Popen(client["command"], cwd=client["cwd"], env=run_env,
                                        stdout=handle, stderr=subprocess.STDOUT)
             processes.append(process)
