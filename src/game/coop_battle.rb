@@ -10,6 +10,18 @@ module AnilCoop
 
   def self.coop_battle_active?; !!@active_battle; end
 
+  def self.canonical_state(value)
+    case value
+    when NilClass, TrueClass, FalseClass, String, Integer, Float then value
+    when Symbol then value.to_s
+    when Array then value.map { |v| canonical_state(v) }
+    when Hash
+      value.keys.sort_by(&:to_s).map { |k| [canonical_state(k), canonical_state(value[k])] }
+    else
+      raise BattleStopped, "non-canonical state object: #{value.class}"
+    end
+  end
+
   def self.battle_receive(message)
     return unless @active_battle == message["battle"]
     if message["type"] == "battle_abort"
@@ -24,6 +36,14 @@ module AnilCoop
     @battle_reply = nil
     queue(type: "battle_step", battle: @active_battle, seq: @battle_seq,
           stage: stage, digest: digest, command: command)
+    log("2v2 submit seq=#{@battle_seq} stage=#{stage} digest=#{digest}")
+    if scene && scene.respond_to?(:pbShowWindow)
+      scene.pbShowWindow(Battle::Scene::MESSAGE_BOX)
+      waiting_window = scene.sprites["messageWindow"]
+      old_letterbyletter = waiting_window.letterbyletter
+      waiting_window.letterbyletter = false
+      waiting_window.text = "Esperando la orden del compañero..."
+    end
     deadline = System.uptime + 120
     loop do
       battle_tick
@@ -40,6 +60,8 @@ module AnilCoop
     @battle_completed = true if stage == "result"
     log("2v2 barrier seq=#{packet['seq']} stage=#{stage} digest=#{digest}")
     packet
+  ensure
+    waiting_window.letterbyletter = old_letterbyletter if waiting_window
   end
 
   # Explicit, reproducible test Pokémon, never derived from either saved team.
@@ -109,6 +131,7 @@ module AnilCoop
     end
     raise battle_error if battle_error
     @last_qa_result = { decision: battle.decision, completed: @battle_completed, rounds: battle.turnCount + 1 }
+    @last_qa_result[:observed] = battle.qa_evidence if battle.respond_to?(:qa_evidence)
     log("2v2 end decision=#{battle.decision} (discarded; no rewards or story)")
     false
   rescue BattleStopped, StandardError => e
@@ -130,6 +153,8 @@ class AnilCoopBattle < Battle
   def initialize(scene, allies, foes, trainers, opponents, local_index, seed)
     @coop_local = local_index
     super(scene, allies, foes, trainers, opponents)
+    # Original Añil/LBDSKY map metadata, environment, weather and battle background.
+    BattleCreationHelperMethods.prepare_battle(self)
     @party1starts = [0, 2]
     @party2starts = [0]
     setBattleMode("double")
@@ -162,11 +187,14 @@ class AnilCoopBattle < Battle
     end
     battlers = @battlers.map do |b|
       b && [b.index, b.pokemonIndex, b.hp, b.status, b.statusCount, b.stages,
-            b.effects, b.ability_id, b.item_id, b.form]
+            b.effects, b.ability_id, b.item_id, b.form,
+            b.attack, b.defense, b.spatk, b.spdef, b.speed]
     end
     data = [parties, battlers, @field.effects, @field.weather, @field.terrain,
-            @sides.map(&:effects), @turnCount, @decision]
-    encoded = JSON.generate(data)
+            @sides.map(&:effects), @turnCount, @decision,
+            @field.weatherDuration, @field.terrainDuration,
+            @priority.map { |entry| [entry[0].index, *entry[1..-1]] }]
+    encoded = JSON.generate(AnilCoop.canonical_state(data))
     File.write(File.join(AnilCoopDev::PROFILE, "qa-2v2-state.json"), encoded)
     Digest::SHA256.hexdigest(encoded)
   end

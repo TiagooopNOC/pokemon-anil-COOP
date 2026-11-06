@@ -41,7 +41,7 @@ module AnilCoopQA
     wait_until { AnilCoop.instance_variable_get(:@trainer_states)[key]&.dig("phase") == "locked" }
     state = AnilCoop.instance_variable_get(:@trainer_states)[key]
     visual = ENV["ANIL_COOP_QA_BOT"] == "visual"
-    scene = visual ? nil : AnilCoopQA::EngineScene.new
+    scene = visual ? AnilCoopQA::VisualScene.new : AnilCoopQA::EngineScene.new
     AnilCoop.qa_coop_battle(state, scene: scene, visual: visual)
     result = AnilCoop.instance_variable_get(:@last_qa_result) || { error: "no result" }
     10.times { Graphics.update; AnilCoop.tick($scene) }
@@ -52,6 +52,13 @@ module AnilCoopQA
     result[:scenario] = scenario
     result[:pass] = result[:completed] && result[:decision] == (scenario == "loss" ? 2 : 1) &&
                     result[:connected_after] && result[:save_unchanged] && result[:scene_map]
+    if scenario == "status"
+      result[:pass] &&= result.dig(:observed, :poison) && result.dig(:observed, :item_consumed)
+    elsif scenario == "switch"
+      result[:pass] &&= result.dig(:observed, :voluntary_switch)
+    elsif scenario == "loss"
+      result[:pass] &&= result.dig(:observed, :forced_replacement)
+    end
     File.write(File.join(AnilCoopDev::PROFILE, "qa-2v2-result.json"), JSON.pretty_generate(result))
     AnilCoop.log("QA RESULT #{JSON.generate(result)}")
   rescue StandardError => e
@@ -86,7 +93,55 @@ module AnilCoopQA
     def pbRefreshEverything; end
   end
 
+  class VisualScene < Battle::Scene
+    def pbDisplayPausedMessage(message)
+      pbDisplayMessage(message)
+    end
+
+    def pbDisplayMessage(message, brief = false, &block)
+      AnilCoop.log("QA message #{message}")
+      super(message.delete("\x01"), brief, &block)
+    end
+
+    def pbUpdate(window = nil)
+      super
+      @qa_last_capture ||= System.uptime
+      if System.uptime - @qa_last_capture >= 15
+        @qa_last_capture = System.uptime
+        bitmap = Graphics.snap_to_bitmap
+        bitmap.save_to_png(File.join(AnilCoopDev::PROFILE, "qa-2v2-live.png"))
+        bitmap.dispose
+      end
+    end
+  end
+
   module Orders
+    def qa_evidence; @qa_evidence ||= {}; end
+
+    def qa_observe
+      qa_evidence[:poison] = true if @battlers.compact.any? { |b| b.status == :POISON }
+      qa_evidence[:stat_change] = true if @battlers.compact.any? { |b| b.stages.values.any? { |v| v != 0 } }
+      if AnilCoopQA.scenario == "status"
+        qa_evidence[:item_consumed] = true if (@party1 + @party2).any? { |p| p.item_id.nil? }
+      end
+    end
+
+    def pbAttackPhase
+      super
+      qa_observe
+    end
+
+    def pbEndOfRoundPhase
+      super
+      qa_observe
+    end
+
+    def pbSwitchInBetween(index, *args)
+      result = super
+      qa_evidence[:forced_replacement] = true if index.even? && @battlers[index].fainted? && result >= 0
+      result
+    end
+
     def pbCommandMenu(index, first_action)
       raise AnilCoop::BattleStopped, "QA exceeded 35 turns" if @turnCount >= 35
       if ENV["ANIL_COOP_QA_BOT"] == "visual" && @turnCount == 0
@@ -118,6 +173,7 @@ module AnilCoopQA
       selected = (0...pbParty(index).length).find { |i| pbCanSwitchIn?(index, i) }
       raise "QA no replacement" unless selected
       pbRegisterSwitch(index, selected) if register
+      qa_evidence[:voluntary_switch] = true if register && !@battlers[index].fainted?
       AnilCoop.log("QA switch owner=#{index} party_index=#{selected}")
       selected
     end
