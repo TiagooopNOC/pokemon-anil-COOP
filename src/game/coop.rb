@@ -375,6 +375,7 @@ class Battle::Scene
   def pbUpdate(cw = nil)
     anil_coop_base_pbUpdate(cw)
     AnilCoop.battle_tick
+    AnilCoop.check_battle_transport! if AnilCoop.respond_to?(:check_battle_transport!)
   end
 end
 

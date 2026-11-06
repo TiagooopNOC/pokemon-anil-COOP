@@ -10,6 +10,11 @@ module AnilCoop
 
   def self.coop_battle_active?; !!@active_battle; end
 
+  def self.check_battle_transport!
+    return unless @active_battle && !@battle_completed && !@battle_cleanup
+    raise BattleStopped, (@battle_failure || "connection lost") if @battle_failure || !connected?
+  end
+
   def self.canonical_state(value)
     case value
     when NilClass, TrueClass, FalseClass, String, Integer, Float then value
@@ -88,6 +93,7 @@ module AnilCoop
     @battle_seq = 0
     @battle_failure = nil
     @battle_completed = false
+    @battle_cleanup = false
     @last_qa_result = nil
     # Trusted local copies protect personal objects even if a plugin accesses globals.
     originals = [$player, $PokemonGlobal, $bag, $stats]
@@ -282,6 +288,7 @@ class AnilCoopBattle < Battle
   def pbStartBattle
     super
   rescue AnilCoop::BattleStopped, StandardError
+    AnilCoop.instance_variable_set(:@battle_cleanup, true)
     @decision = 0
     @scene.pbEndBattle(0)
     raise

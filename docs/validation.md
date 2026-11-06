@@ -145,3 +145,22 @@ programadas y la escena de diagnóstico sin gráficos: 14 rondas, sustitución p
 debilitamiento y victoria con hashes iguales; ambos saves intactos y conexión viva.
 No valida los menús ni la presentación visual. Equipos temporales, sin recompensas,
 EXP ni persistencia; no equivale a integración terminada con equipos personales.
+
+### Cierre gráfico y desconexiones — 2026-11-06
+
+Checkpoint `73e0d2d`. El bloqueo visual era una página de texto de Mar Llamas
+esperando confirmación; el bot ahora usa `Window#resume`, sin simular teclas ni
+cambiar los controles humanos. El escenario usa la preparación nativa Añil/LBDSKY.
+`VIS004`: dos Game.exe reales bajo Wine, gráficos y órdenes programadas, victoria
+en 11 rondas con checksums coincidentes; ambos regresaron al mapa renderizado,
+se vieron y recibieron posiciones nuevas del compañero. Capturas de ambos mapas
+inspeccionadas; guardados aislados sin cambios. Evidencia privada: reporte
+`anil-wine-99bec222347b4fdf876a386db2ee7ee1.json` en `local/reports/`.
+`DISC001`: desconexión en turno 1 con gráficos, ambos abortaron y regresaron al
+mapa sin escribir resultados/guardados. `DESYNC1`: alteración deliberada de 1 PS
+en el motor sin gráficos, ambos rechazaron el estado y abortaron. No se desactivó
+ningún checksum. Las pruebas anteriores de cambio voluntario y derrota pasaron
+con motores reales sin renderizado; no se repitieron.
+Pendiente: selección humana de órdenes hasta finalizar, Windows nativo, equipos
+personales y recompensas persistentes. Captura/EXP/evolución salvajes siguen
+pendientes de prueba manual independiente.

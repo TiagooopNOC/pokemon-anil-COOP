@@ -22,6 +22,7 @@ module AnilCoopQA
     Game.load(save_data)
     $game_player.refresh
     $scene.createSpritesets
+    Graphics.transition(0) # Mirror Scene_Map.main's initialization in this driver.
     wait_until { AnilCoop.connected? && AnilCoop.instance_variable_get(:@peers).length == 1 }
     AnilCoop.qa_trainer
     event = $game_map.events.fetch(9000)
@@ -37,6 +38,9 @@ module AnilCoopQA
       state && state["participants"].length == 2 && state["participants"].all? { |p| p["ready"] }
     end
     state = AnilCoop.instance_variable_get(:@trainer_states)[key]
+    my_id = AnilCoop.instance_variable_get(:@id)
+    remote_id = state["participants"].find { |p| p["id"] != my_id }["id"]
+    remote_before = AnilCoop.instance_variable_get(:@peers)[remote_id]["position"].dup
     AnilCoop.trainer_send("trainer_start", event, solo: false) if state["host"] == AnilCoop.instance_variable_get(:@id)
     wait_until { AnilCoop.instance_variable_get(:@trainer_states)[key]&.dig("phase") == "locked" }
     state = AnilCoop.instance_variable_get(:@trainer_states)[key]
@@ -48,11 +52,46 @@ module AnilCoopQA
     result[:connected_after] = AnilCoop.connected?
     result[:save_unchanged] = before == Digest::SHA256.file(path).hexdigest
     result[:scene_map] = $scene.is_a?(Scene_Map) && !$game_temp.in_battle
+    if result[:completed]
+      delta = state["host"] == my_id ? 1 : 2
+      $game_player.moveto($game_player.x, $game_player.y + delta)
+      wait_until(12) do
+        peer = AnilCoop.instance_variable_get(:@peers)[remote_id]
+        peer && peer.dig("position", "y") == remote_before["y"] + (3 - delta) &&
+          AnilCoop.instance_variable_get(:@sprites).key?(remote_id)
+      end
+      result[:peer_visible_after] = true
+      deadline = System.uptime + 2
+      while System.uptime < deadline
+        $scene.miniupdate
+        Graphics.update
+      end
+      if visual
+        bitmap = Graphics.snap_to_bitmap
+        bitmap.save_to_png(File.join(AnilCoopDev::PROFILE, "qa-2v2-map.png"))
+        colors = []
+        8.times do |x|
+          8.times do |y|
+            pixel = bitmap.get_pixel(x * bitmap.width / 8, y * bitmap.height / 8)
+            colors << [pixel.red, pixel.green, pixel.blue]
+          end
+        end
+        result[:map_rendered] = colors.uniq.length >= 6
+        bitmap.dispose
+      end
+    end
     result[:kind] = visual ? "rendered_engine_programmed_orders" : "engine_without_battle_rendering"
     result[:scenario] = scenario
     result[:pass] = result[:completed] && result[:decision] == (scenario == "loss" ? 2 : 1) &&
-                    result[:connected_after] && result[:save_unchanged] && result[:scene_map]
-    if scenario == "status"
+                    result[:connected_after] && result[:save_unchanged] && result[:scene_map] && result[:peer_visible_after]
+    result[:pass] &&= result[:map_rendered] if visual
+    if scenario == "disconnect"
+      result[:pass] = !result[:completed] && result[:error].to_s.match?(/connection lost|battle_disconnect/) &&
+                      result[:save_unchanged] && result[:scene_map]
+    elsif scenario == "desync"
+      result[:pass] = !result[:completed] && result[:error].to_s.include?("battle_desync") &&
+                      result[:save_unchanged] && result[:scene_map]
+    elsif scenario == "status"
       result[:pass] &&= result.dig(:observed, :poison) && result.dig(:observed, :item_consumed)
     elsif scenario == "switch"
       result[:pass] &&= result.dig(:observed, :voluntary_switch)
@@ -105,6 +144,8 @@ module AnilCoopQA
 
     def pbUpdate(window = nil)
       super
+      # The bot advances text pages through Essentials' API, never OS key input.
+      window.resume if window && window.respond_to?(:pausing?) && window.pausing?
       @qa_last_capture ||= System.uptime
       if System.uptime - @qa_last_capture >= 15
         @qa_last_capture = System.uptime
@@ -132,6 +173,9 @@ module AnilCoopQA
     end
 
     def pbEndOfRoundPhase
+      if @turnCount == 0 && @coop_local == 2 && AnilCoopQA.scenario == "desync"
+        @battlers[0].hp -= 1 # Negative test: validation must reject this corruption.
+      end
       super
       qa_observe
     end
@@ -144,6 +188,10 @@ module AnilCoopQA
 
     def pbCommandMenu(index, first_action)
       raise AnilCoop::BattleStopped, "QA exceeded 35 turns" if @turnCount >= 35
+      if @turnCount == 1 && @coop_local == 2 && AnilCoopQA.scenario == "disconnect"
+        AnilCoop.disconnect
+        raise AnilCoop::BattleStopped, "connection lost (injected by QA)"
+      end
       if ENV["ANIL_COOP_QA_BOT"] == "visual" && @turnCount == 0
         bitmap = Graphics.snap_to_bitmap
         bitmap.save_to_png(File.join(AnilCoopDev::PROFILE, "qa-2v2-battle.png"))
