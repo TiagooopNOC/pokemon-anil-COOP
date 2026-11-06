@@ -30,6 +30,8 @@ def main() -> int:
     parser.add_argument("--qa-wild-client", action="append", default=[])
     parser.add_argument("--qa-trainer", action="store_true")
     parser.add_argument("--qa-2v2", action="store_true", help="Experimental NPC fixture, temporary teams, no rewards/saves")
+    parser.add_argument("--qa-battle-bot", choices=("engine", "visual"))
+    parser.add_argument("--qa-scenario", choices=("basic", "status", "switch", "loss"), default="basic")
     parser.add_argument("--qa-starter", action="append", default=[], metavar="CLIENT:SPECIES")
     parser.add_argument("--qa-randomlocke", action="append", default=[], metavar="CLIENT")
     args = parser.parse_args()
@@ -40,6 +42,8 @@ def main() -> int:
     selected = args.clients or ([args.client] if args.client else [])
     if args.qa_2v2 and (not args.qa_trainer or not args.session or len(selected) != 2):
         raise SafetyError("--qa-2v2 requires --qa-trainer, --session and exactly two clients")
+    if args.qa_battle_bot and not args.qa_2v2:
+        raise SafetyError("--qa-battle-bot requires --qa-2v2")
     if args.client and args.clients:
         raise SafetyError("Choose --client or --clients")
     plan = launch_plan(ROOT, selected)["clients"]
@@ -79,6 +83,9 @@ def main() -> int:
         marker = profile / "bootstrap-loaded.txt"
         if marker.exists():
             marker.rename(profile / "logs" / ("bootstrap-previous-" + uuid.uuid4().hex + ".txt"))
+        qa_result = profile / "qa-2v2-result.json"
+        if args.qa_battle_bot and qa_result.exists():
+            qa_result.rename(profile / "logs" / ("qa-2v2-previous-" + uuid.uuid4().hex + ".json"))
     slot_tool = args.gameslot.resolve()
     if not slot_tool.is_file():
         raise SafetyError("Reviewed GameSlot path is missing")
@@ -106,6 +113,10 @@ def main() -> int:
             run_env.pop("ANIL_COOP_QA_STARTER", None)
             run_env.pop("ANIL_COOP_QA_RANDOMLOCKE", None)
             run_env.pop("ANIL_COOP_QA_2V2", None)
+            run_env.pop("ANIL_COOP_QA_BOT", None)
+            run_env.pop("ANIL_COOP_QA_SCENARIO", None)
+            if args.qa_battle_bot:
+                run_env.update(ANIL_COOP_QA_BOT=args.qa_battle_bot, ANIL_COOP_QA_SCENARIO=args.qa_scenario)
             if args.qa_2v2:
                 run_env["ANIL_COOP_QA_2V2"] = "1"
             if client["client"] in args.qa_wild_client:
@@ -138,9 +149,15 @@ def main() -> int:
                          "log": str(output)} for client, process, output in processes]
         result = {"clients": observations, "duration_limit_seconds": args.seconds,
                   "gameplay_save_reload": "NOT_TESTED_BY_THIS_RUNNER"}
+        if args.qa_battle_bot:
+            for observation, client in zip(observations, plan):
+                report = Path(client["save_directory"]).parent / "qa-2v2-result.json"
+                observation["battle_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
         write_new(result_path, result)
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
-        return 0 if all(item["bootstrap_observed"] for item in observations) else 2
+        return 0 if all(item["bootstrap_observed"] and
+                        (not args.qa_battle_bot or item["battle_qa"]["pass"])
+                        for item in observations) else 2
     finally:
         for client, process, _ in processes:
             if process.poll() is None:

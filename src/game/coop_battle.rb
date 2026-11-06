@@ -60,12 +60,13 @@ module AnilCoop
     pkmn
   end
 
-  def self.qa_coop_battle(state)
+  def self.qa_coop_battle(state, scene: nil, visual: true)
     return false unless qa_2v2? && state["event"] == 9000 && state["participants"].length == 2
     @active_battle = state["battle"]
     @battle_seq = 0
     @battle_failure = nil
     @battle_completed = false
+    @last_qa_result = nil
     # Trusted local copies protect personal objects even if a plugin accesses globals.
     originals = [$player, $PokemonGlobal, $bag, $stats]
     $player, $PokemonGlobal, $bag, $stats = Marshal.load(Marshal.dump(originals))
@@ -87,28 +88,33 @@ module AnilCoop
     p2[1].personalID = 3002
     raise BattleStopped, "enemy clone aliases moves" if p2[0].moves[0].equal?(p2[1].moves[0])
     foe.party = p2
-    scene = BattleCreationHelperMethods.create_battle_scene
+    scene ||= BattleCreationHelperMethods.create_battle_scene
     local_index = state["participants"].index { |p| p["id"] == @id } * 2
     battle = AnilCoopBattle.new(scene, p1, p2, trainers, [foe], local_index, state["seed"])
     battle_barrier("setup", battle.coop_digest)
     log("2v2 begin owned=#{local_index} temporary_teams=true")
     battle_error = nil
-    pbBattleAnimation(pbGetTrainerBattleBGM([foe]), 3, [foe]) do
-      pbSceneStandby do
-        begin
-          battle.pbStartBattle
-        rescue BattleStopped, StandardError => e
-          # Let Essentials restore map sprites, music and in_battle before reporting.
-          battle_error = e
-        end
+    run = proc do
+      begin
+        battle.pbStartBattle
+      rescue BattleStopped, StandardError => e
+        # Let Essentials restore map sprites, music and in_battle before reporting.
+        battle_error = e
       end
     end
+    if visual
+      pbBattleAnimation(pbGetTrainerBattleBGM([foe]), 3, [foe]) { pbSceneStandby { run.call } }
+    else
+      run.call
+    end
     raise battle_error if battle_error
+    @last_qa_result = { decision: battle.decision, completed: @battle_completed, rounds: battle.turnCount + 1 }
     log("2v2 end decision=#{battle.decision} (discarded; no rewards or story)")
     false
   rescue BattleStopped, StandardError => e
+    @last_qa_result = { error: "#{e.class}: #{e.message}", completed: false }
     log("2v2 stopped #{e.class}: #{e.message}\n#{e.backtrace&.first(6)&.join("\n")}")
-    pbMessage("Prueba 2v2 detenida: #{e.message}. No se guardaron resultados.")
+    pbMessage("Prueba 2v2 detenida: #{e.message}. No se guardaron resultados.") unless @qa_automation
     false
   ensure
     if @active_battle && !@battle_completed
@@ -156,7 +162,7 @@ class AnilCoopBattle < Battle
     end
     battlers = @battlers.map do |b|
       b && [b.index, b.pokemonIndex, b.hp, b.status, b.statusCount, b.stages,
-            b.effects, b.ability, b.item, b.form]
+            b.effects, b.ability_id, b.item_id, b.form]
     end
     data = [parties, battlers, @field.effects, @field.weather, @field.terrain,
             @sides.map(&:effects), @turnCount, @decision]
@@ -257,7 +263,17 @@ end
 class << Game
   alias_method :anil_coop_battle_save, :save unless method_defined?(:anil_coop_battle_save)
   def save(*args)
-    return false if AnilCoop.coop_battle_active?
+    return false if AnilCoop.coop_battle_active? || ENV["ANIL_COOP_QA_BOT"]
     anil_coop_battle_save(*args)
+  end
+end
+
+class << PBDebug
+  alias_method :anil_coop_logonerr, :logonerr unless method_defined?(:anil_coop_logonerr)
+  def logonerr(&block)
+    # Essentials normally reports and swallows errors here. A network turn must
+    # abort both replicas instead of continuing after a failed validation/action.
+    return yield if AnilCoop.coop_battle_active?
+    anil_coop_logonerr(&block)
   end
 end

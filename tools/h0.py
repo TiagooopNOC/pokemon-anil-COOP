@@ -346,6 +346,8 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bo
             run_env.pop("ANIL_COOP_QA_STARTER", None)
             run_env.pop("ANIL_COOP_QA_RANDOMLOCKE", None)
             run_env.pop("ANIL_COOP_QA_2V2", None)
+            run_env.pop("ANIL_COOP_QA_BOT", None)
+            run_env.pop("ANIL_COOP_QA_SCENARIO", None)
             if qa_2v2:
                 run_env.update(ANIL_COOP_QA_TRAINER="1", ANIL_COOP_QA_2V2="1")
             process = subprocess.Popen(client["command"], cwd=client["cwd"], env=run_env,

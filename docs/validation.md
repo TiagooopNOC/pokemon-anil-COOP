@@ -133,3 +133,15 @@ simultáneos apareció Rattata frente a Wooper, respectivamente. Los SHA-256 de
 ambos guardados permanecen iguales tras cerrar las pruebas incompletas.
 Captura, experiencia y evolución aún requieren acciones manuales en el juego;
 la automatización de entrada fue rechazada por la revisión del entorno.
+
+## Prototipo 2v2 — 2026-11-06
+
+Checkpoint de recuperación: `08e6c77`. Los logs de la prueba manual anterior
+confirman checksum inicial coincidente y entrada al combate en ambas copias;
+no confirmaban un turno completo. Se corrigieron IDs de habilidades/objetos
+también en battlers y el manejo de excepciones que Essentials normalmente absorbe.
+La prueba `BOT006` ejecutó el motor original en dos procesos Wine, con órdenes
+programadas y la escena de diagnóstico sin gráficos: 14 rondas, sustitución por
+debilitamiento y victoria con hashes iguales; ambos saves intactos y conexión viva.
+No valida los menús ni la presentación visual. Equipos temporales, sin recompensas,
+EXP ni persistencia; no equivale a integración terminada con equipos personales.
