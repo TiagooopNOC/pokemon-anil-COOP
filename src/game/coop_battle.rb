@@ -1,4 +1,4 @@
-# Experimental QA fixture only. No network Marshal, persistence, rewards or story hooks.
+# Experimental QA fixture only. No network Marshal, persistence or story hooks.
 require "digest"
 
 module AnilCoop
@@ -138,7 +138,8 @@ module AnilCoop
     raise battle_error if battle_error
     @last_qa_result = { decision: battle.decision, completed: @battle_completed, rounds: battle.turnCount + 1 }
     @last_qa_result[:observed] = battle.qa_evidence if battle.respond_to?(:qa_evidence)
-    log("2v2 end decision=#{battle.decision} (discarded; no rewards or story)")
+    @last_qa_result[:reward_preview] = battle.coop_reward_preview
+    log("2v2 end decision=#{battle.decision} (temporary reward preview discarded; no persistence or story)")
     false
   rescue BattleStopped, StandardError => e
     @last_qa_result = { error: "#{e.class}: #{e.message}", completed: false }
@@ -169,11 +170,63 @@ class AnilCoopBattle < Battle
     @items = [[]]
     @ally_items = [[], []]
     @z_rng = ZCable::BattleRNG.new(seed)
+    # Both QA foes originate from one trainer Pokémon. Never award its EXP twice.
+    @coop_enemy_origins = [0, 0]
+    @coop_defeated = {}
+    @coop_rewards_applied = false
   end
 
   def pbOwnedByPlayer?(index); index == @coop_local; end
   def pbCanMegaEvolve?(*); false; end
-  def pbGainExp; end
+  RewardFoe = Struct.new(:pokemon, :level, :participants)
+  attr_reader :coop_reward_preview
+
+  # Record native participation now; local rewards must not alter a shared turn.
+  def pbGainExp
+    @battlers.compact.each do |b|
+      next unless b.opposes? && b.fainted? && !b.participants.empty?
+      origin = @coop_enemy_origins.fetch(b.pokemonIndex)
+      record = @coop_defeated[origin] ||= RewardFoe.new(
+        Marshal.load(Marshal.dump(b.pokemon)), b.level, [])
+      record.participants |= b.participants
+    end
+  end
+
+  def pbPlayer
+    return @player[@coop_local / 2] if @coop_reward_owner
+    super
+  end
+
+  # QA preview only, on temporary teams, after the server has agreed on victory.
+  # Persistence needs a durable battle receipt before this can touch saved teams.
+  def coop_apply_reward_preview
+    return if @coop_rewards_applied || @decision != 1 ||
+              !AnilCoop.instance_variable_get(:@battle_completed)
+    @coop_rewards_applied = true # Never retry a partially applied local reward.
+    @coop_reward_owner = true
+    owned = (@coop_local...@coop_local + 2).to_a
+    before = @party1.map { |p| [p.exp, p.level] }
+    other = @party1.each_index.to_a - owned
+    remote_before = Marshal.dump(other.map { |i| @party1[i] })
+    @coop_defeated.each_value do |foe|
+      eligible = foe.participants.select { |i| owned.include?(i) && @party1[i].able? }
+      eligible.each do |i|
+        pbGainEVsOne(i, foe)
+        pbGainExpOne(i, foe, eligible.length, [], false)
+      end
+    end
+    raise AnilCoop::BattleStopped, "reward changed remote team" unless
+      remote_before == Marshal.dump(other.map { |i| @party1[i] })
+    @coop_reward_preview = {
+      owner: @coop_local / 2, enemy_origins: @coop_defeated.length,
+      exp_delta: @party1.each_with_index.map { |p, i| p.exp - before[i][0] },
+      levels_before: before.map(&:last), levels_after: @party1.map(&:level),
+      remote_unchanged: true, persisted: false, money: 0
+    }
+    AnilCoop.log("2v2 reward preview #{JSON.generate(@coop_reward_preview)}")
+  ensure
+    @coop_reward_owner = false
+  end
   def pbGainMoney; end
   def pbLoseMoney; end
 
@@ -194,12 +247,13 @@ class AnilCoopBattle < Battle
     battlers = @battlers.map do |b|
       b && [b.index, b.pokemonIndex, b.hp, b.status, b.statusCount, b.stages,
             b.effects, b.ability_id, b.item_id, b.form,
-            b.attack, b.defense, b.spatk, b.spdef, b.speed]
+            b.attack, b.defense, b.spatk, b.spdef, b.speed, b.participants.sort]
     end
     data = [parties, battlers, @field.effects, @field.weather, @field.terrain,
             @sides.map(&:effects), @turnCount, @decision,
             @field.weatherDuration, @field.terrainDuration,
-            @priority.map { |entry| [entry[0].index, *entry[1..-1]] }]
+            @priority.map { |entry| [entry[0].index, *entry[1..-1]] },
+            @coop_defeated.sort.map { |origin, foe| [origin, foe.participants.sort] }]
     encoded = JSON.generate(AnilCoop.canonical_state(data))
     File.write(File.join(AnilCoopDev::PROFILE, "qa-2v2-state.json"), encoded)
     Digest::SHA256.hexdigest(encoded)
@@ -282,6 +336,7 @@ class AnilCoopBattle < Battle
 
   def pbEndOfBattle
     AnilCoop.battle_barrier("result", coop_digest, nil, @scene)
+    coop_apply_reward_preview
     super
   end
 
@@ -292,6 +347,14 @@ class AnilCoopBattle < Battle
     @decision = 0
     @scene.pbEndBattle(0)
     raise
+  end
+end
+
+class Battle::Scene
+  # Native level-up stat windows otherwise wait for input without a scene update.
+  # Keep the session alive while a human reads them; ordinary battles stay native.
+  def pbTopRightWindow(text, scene = nil)
+    super(text, AnilCoop.coop_battle_active? ? self : scene)
   end
 end
 

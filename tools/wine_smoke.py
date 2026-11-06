@@ -31,7 +31,7 @@ def main() -> int:
     parser.add_argument("--qa-trainer", action="store_true")
     parser.add_argument("--qa-2v2", action="store_true", help="Experimental NPC fixture, temporary teams, no rewards/saves")
     parser.add_argument("--qa-battle-bot", choices=("engine", "visual"))
-    parser.add_argument("--qa-scenario", choices=("basic", "status", "switch", "loss", "disconnect", "desync"), default="basic")
+    parser.add_argument("--qa-scenario", choices=("basic", "status", "switch", "loss", "disconnect", "desync", "rewards"), default="basic")
     parser.add_argument("--qa-starter", action="append", default=[], metavar="CLIENT:SPECIES")
     parser.add_argument("--qa-randomlocke", action="append", default=[], metavar="CLIENT")
     args = parser.parse_args()

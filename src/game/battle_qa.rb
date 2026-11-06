@@ -97,6 +97,12 @@ module AnilCoopQA
       result[:pass] &&= result.dig(:observed, :voluntary_switch)
     elsif scenario == "loss"
       result[:pass] &&= result.dig(:observed, :forced_replacement)
+    elsif scenario == "rewards"
+      reward = result[:reward_preview] || {}
+      result[:pass] &&= reward[:remote_unchanged] && reward[:enemy_origins] == 1 &&
+        reward[:exp_delta]&.any? { |v| v > 0 } &&
+        reward[:levels_after]&.zip(reward[:levels_before])&.any? { |a, b| a > b } &&
+        result.dig(:observed, :reward_replay_safe)
     end
     File.write(File.join(AnilCoopDev::PROFILE, "qa-2v2-result.json"), JSON.pretty_generate(result))
     AnilCoop.log("QA RESULT #{JSON.generate(result)}")
@@ -133,6 +139,24 @@ module AnilCoopQA
   end
 
   class VisualScene < Battle::Scene
+    # Timed confirmation only in the QA driver, using the native stat window.
+    def pbTopRightWindow(text, _scene = nil)
+      window = Window_AdvancedTextPokemon.new(text)
+      window.width = 198
+      window.x = Graphics.width - window.width
+      window.z = 99999
+      deadline = System.uptime + 1
+      loop do
+        pbUpdate(window)
+        break if System.uptime >= deadline
+      end
+      bitmap = Graphics.snap_to_bitmap
+      bitmap.save_to_png(File.join(AnilCoopDev::PROFILE, "qa-2v2-levelup.png"))
+    ensure
+      bitmap&.dispose
+      window&.dispose
+    end
+
     def pbDisplayPausedMessage(message)
       pbDisplayMessage(message)
     end
@@ -158,6 +182,15 @@ module AnilCoopQA
 
   module Orders
     def qa_evidence; @qa_evidence ||= {}; end
+
+    def coop_apply_reward_preview
+      super
+      if AnilCoopQA.scenario == "rewards"
+        before = Marshal.dump(@party1)
+        super # Deliberate replay: the reward must be applied at most once.
+        qa_evidence[:reward_replay_safe] = before == Marshal.dump(@party1)
+      end
+    end
 
     def qa_observe
       qa_evidence[:poison] = true if @battlers.compact.any? { |b| b.status == :POISON }
@@ -242,6 +275,13 @@ module AnilCoopQA
       elsif AnilCoopQA.scenario == "status"
         pkmn.moves << Pokemon::Move.new(:POISONPOWDER) if pid == 1001
         pkmn.item = :ORANBERRY
+      elsif AnilCoopQA.scenario == "rewards"
+        if pid < 3000
+          pkmn.exp = pkmn.growth_rate.minimum_exp_for_level(11) - 1
+        else
+          # Isolate reward UI from KO randomness: both owners must remain eligible.
+          pkmn.moves = [Pokemon::Move.new(:SPLASH)]
+        end
       end
       pkmn
     end

@@ -164,3 +164,28 @@ con motores reales sin renderizado; no se repitieron.
 Pendiente: selección humana de órdenes hasta finalizar, Windows nativo, equipos
 personales y recompensas persistentes. Captura/EXP/evolución salvajes siguen
 pendientes de prueba manual independiente.
+
+### Experiencia por propietario (temporal)
+
+`REWARD1`, dos motores reales sin renderizado: victoria, cada Squirtle propio
+recibió 125 EXP y subió de 10 a 11; el equipo remoto no cambió. La segunda llamada
+al reparto no añadió EXP. Los dos enemigos cuentan como un único origen para la
+recompensa. El cálculo de EXP/EV y la subida usan los métodos originales de Añil
+con Level Caps EX. Se aplican después del resultado acordado, a equipos temporales;
+no hay dinero, evolución ni persistencia. Reporte privado:
+`anil-wine-abd261d0b0514b37970148974b00e34c.json`.
+`REWARD2` llegó gráficamente a victoria y subida de nivel, pero se detuvo en la
+confirmación de estadísticas; se cerró de forma controlada y no cuenta como prueba
+completa. El bot ahora muestra esa ventana nativa con confirmación temporizada;
+para el jugador humano se conserva el botón normal y se bombea la conexión.
+Reproducción/manual: [qa-2v2.md](qa-2v2.md).
+`REWARD3` completó gráficamente victoria y retorno conectado en ambos; uno mostró
+125 EXP/subida y el otro no recibió EXP porque su participante había caído y su
+reserva no participó. Por eso no pasó la expectativa de subida para ambos. Para
+probar esa UI sin depender de los KO aleatorios, el escenario `rewards` usa ahora
+un rival temporal con Salpicadura; el escenario `basic` conserva el combate normal.
+`REWARD4` pasó en ambos motores con gráficos: cinco rondas, victoria acordada,
+125 EXP para Bulbasaur/Charmander de sus respectivos propietarios, nivel 10→11,
+ventanas de estadísticas, repetición sin EXP adicional y regreso a ambos mapas
+con conexión/posición remota. Guardados intactos. Reporte privado:
+`anil-wine-30ea781146fc4b01a1f5a91865ed7db8.json`.
