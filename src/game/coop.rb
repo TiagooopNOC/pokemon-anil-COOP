@@ -242,12 +242,20 @@ module AnilCoop
     qa_coop_battle(state)
   end
 
-  def self.trainer_lobby(event, forced)
+  def self.trainer_lobby(event, forced, trainer_args = nil)
     key = [event.map_id, event.id]
     @trainer_states.delete(key)
     @trainer_error = nil
+    @pending_foe = nil
     extras = { forced: forced }
-    extras[:prototype] = battle_prototype if respond_to?(:qa_2v2?) && qa_2v2? && event.id == 9000
+    extras[:prototype] = battle_prototype if respond_to?(:qa_2v2?) && qa_2v2? && (personal_team? || event.id == 9000)
+    if personal_team? && trainer_args
+      extras[:encounter_key] = trainer_identity(event, trainer_args)
+      if trainer_completed?(extras[:encounter_key])
+        pbMessage("Ya derrotaste a este entrenador en tu partida.") { network }
+        return false
+      end
+    end
     trainer_send("trainer_wait", event, extras)
     state = trainer_wait_for(event, "pending")
     return yield if !state && forced
@@ -278,13 +286,26 @@ module AnilCoop
       elsif host && (choice == 2 || choice == 3)
         solo = choice == 3
         @trainer_error = nil
+        if !solo && personal_team? && trainer_args
+          begin
+            send_trainer_foe(event, trainer_args)
+          rescue StandardError => e
+            pbMessage(e.message) { network }
+            next
+          end
+        end
         trainer_send("trainer_start", event, solo: solo)
         locked = trainer_wait_for(event, "locked")
         if locked && locked["participants"].any? { |p| p["id"] == @id }
           return start_qa_battle(locked) if locked["battle"]
           log("trainer solo start map=#{event.map_id} event=#{event.id}")
           begin
-            return yield
+            won = yield
+            if won && extras[:encounter_key]
+              $PokemonGlobal.anil_coop_trainers ||= {}
+              $PokemonGlobal.anil_coop_trainers[extras[:encounter_key]] = true
+            end
+            return won
           ensure
             trainer_send("trainer_finish", event) if @socket
           end
@@ -390,6 +411,6 @@ class << TrainerBattle
     return anil_coop_base_start(*args) unless pbMapInterpreterRunning?
     event = pbMapInterpreter.get_self
     return anil_coop_base_start(*args) unless event && event.name[/trainer\(\d+\)/i]
-    AnilCoop.trainer_lobby(event, event.trigger == 2) { anil_coop_base_start(*args) }
+    AnilCoop.trainer_lobby(event, event.trigger == 2, args) { anil_coop_base_start(*args) }
   end
 end

@@ -34,13 +34,13 @@ def validate_trainer(trainer):
             _data_id(trainer["trainer_type"]))
 
 
-def validate_team(team):
+def validate_team(team, max_size=3):
     """Validate only primitive snapshots, never deserialize executable game objects.
 
     All fields, nesting and collection sizes are bounded. Clients also resolve
     game-data IDs and verify reconstructed effective stats before the setup barrier.
     """
-    if not isinstance(team, list) or not 1 <= len(team) <= 3:
+    if not isinstance(team, list) or not 1 <= len(team) <= max_size:
         return False
     keys, slots = set(), set()
     for pokemon in team:

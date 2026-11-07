@@ -13,9 +13,9 @@ import threading
 import time
 
 if __package__:
-    from .coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, validate_team, validate_trainer
+    from .coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, DIGEST, validate_team, validate_trainer
 else:
-    from coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, validate_team, validate_trainer
+    from coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, DIGEST, validate_team, validate_trainer
 
 MAX_LINE = 32768  # Bounded personal-team snapshots; no binary game objects.
 MAX_PLAYERS = 4
@@ -141,20 +141,28 @@ class State:
                     return {"type": "error", "reason": "trainer_map_mismatch"}, identity
                 key = f"{map_id}:{event_id}"
                 prototype = message.get("prototype")
-                if prototype not in (None, PROTOTYPE, PERSONAL_PROTOTYPE) or (prototype and event_id != 9000):
+                if prototype not in (None, PROTOTYPE, PERSONAL_PROTOTYPE) or (prototype == PROTOTYPE and event_id != 9000):
                     return {"type": "error", "reason": "trainer_prototype"}, identity
+                encounter_key = message.get("encounter_key")
+                if prototype == PERSONAL_PROTOTYPE and event_id != 9000:
+                    if not isinstance(encounter_key, str) or not DIGEST.fullmatch(encounter_key):
+                        return {"type": "error", "reason": "trainer_encounter_key"}, identity
+                elif encounter_key is not None:
+                    return {"type": "error", "reason": "trainer_encounter_key"}, identity
                 if any(player_id in e["participants"] and k != key for k, e in room["trainers"].items()):
                     return {"type": "error", "reason": "trainer_busy"}, identity
                 encounter = room["trainers"].get(key)
                 if encounter and encounter["phase"] != "pending":
                     return {"type": "error", "reason": "trainer_locked"}, identity
+                if encounter and encounter.get("encounter_key") != encounter_key:
+                    return {"type": "error", "reason": "trainer_incompatible"}, identity
                 if not encounter:
                     encounter = {"map": map_id, "event": event_id, "host": player_id,
-                                 "phase": "pending", "participants": {}}
+                                 "phase": "pending", "participants": {}, "encounter_key": encounter_key}
                     room["trainers"][key] = encounter
                 encounter["participants"][player_id] = {"ready": False, "forced": forced, "prototype": prototype}
                 return self.trainer_notify(room, encounter, sock), identity
-            if kind in ("trainer_team", "trainer_ready", "trainer_cancel", "trainer_start", "trainer_finish"):
+            if kind in ("trainer_foe", "trainer_team", "trainer_ready", "trainer_cancel", "trainer_start", "trainer_finish"):
                 map_id, event_id = message.get("map"), message.get("event")
                 if type(map_id) is not int or type(event_id) is not int:
                     return {"type": "error", "reason": "invalid_trainer"}, identity
@@ -172,6 +180,19 @@ class State:
                     return {"type": "trainer_closed", "map": map_id, "event": event_id}, identity
                 if encounter["phase"] != "pending":
                     return {"type": "error", "reason": "trainer_locked"}, identity
+                if kind == "trainer_foe":
+                    if player_id != encounter["host"]:
+                        return {"type": "error", "reason": "trainer_not_host"}, identity
+                    if encounter["participants"][player_id].get("prototype") != PERSONAL_PROTOTYPE:
+                        return {"type": "error", "reason": "trainer_prototype"}, identity
+                    if not validate_team(message.get("team"), max_size=6) or not validate_trainer(message.get("trainer")):
+                        return {"type": "error", "reason": "invalid_trainer_foe"}, identity
+                    if encounter.get("enemy_team") is not None and (
+                            encounter["enemy_team"] != message["team"] or encounter["enemy_trainer"] != message["trainer"]):
+                        return {"type": "error", "reason": "trainer_foe_fixed"}, identity
+                    encounter["enemy_team"] = copy.deepcopy(message["team"])
+                    encounter["enemy_trainer"] = copy.deepcopy(message["trainer"])
+                    return self.trainer_notify(room, encounter, sock), identity
                 if kind == "trainer_team":
                     entry = encounter["participants"][player_id]
                     if entry.get("prototype") != PERSONAL_PROTOTYPE:
@@ -212,7 +233,7 @@ class State:
                                  if pid != player_id and entry["ready"]]
                 if len(selected) != 1:
                     prototype = encounter["participants"][player_id].get("prototype")
-                    if (len(selected) != 2 or event_id != 9000 or
+                    if (len(selected) != 2 or (prototype == PROTOTYPE and event_id != 9000) or
                             prototype not in (PROTOTYPE, PERSONAL_PROTOTYPE) or
                             any(not encounter["participants"][pid]["ready"] or
                                 encounter["participants"][pid].get("prototype") != prototype
@@ -222,6 +243,8 @@ class State:
                     if prototype == PERSONAL_PROTOTYPE:
                         if any(not encounter["participants"][pid].get("team") for pid in selected):
                             return {"type": "error", "reason": "trainer_team_required"}, identity
+                        if event_id != 9000 and not encounter.get("enemy_team"):
+                            return {"type": "error", "reason": "trainer_foe_required"}, identity
                         sizes = tuple(len(encounter["participants"][pid]["team"]) for pid in selected)
                     encounter["prototype"] = prototype
                     encounter["battle"] = BattleExchange(selected, sizes)
@@ -234,6 +257,7 @@ class State:
     def trainer_public(room, encounter, recipient=None):
         state = {"type": "trainer_state", "map": encounter["map"], "event": encounter["event"],
                 "phase": encounter["phase"], "host": encounter["host"],
+                "encounter_key": encounter.get("encounter_key"),
                 "battle": encounter["battle"].id if encounter.get("battle") else None,
                 "seed": encounter["battle"].seed if encounter.get("battle") else None,
                 "participants": [{"id": pid, "name": room["members"][pid]["name"],
@@ -247,6 +271,9 @@ class State:
                     recipient in encounter["participants"]):
                 state["selected_teams"] = [entry["team"] for entry in encounter["participants"].values()]
                 state["selected_trainers"] = [entry["trainer"] for entry in encounter["participants"].values()]
+                if encounter.get("enemy_team"):
+                    state["enemy_team"] = encounter["enemy_team"]
+                    state["enemy_trainer"] = encounter["enemy_trainer"]
         return state
 
     def trainer_notify(self, room, encounter, except_sock):

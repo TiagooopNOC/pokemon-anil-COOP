@@ -88,7 +88,15 @@ module AnilCoop
   end
 
   def self.qa_coop_battle(state, scene: nil, visual: true)
-    return false unless qa_2v2? && state["event"] == 9000 && state["participants"].length == 2
+    @last_qa_result = nil
+    run_coop_battle(state, scene: scene, visual: visual)
+    state["prototype"] == "personal2v2-v1" && @last_qa_result &&
+      @last_qa_result[:completed] && @last_qa_result[:decision] == 1 && @last_qa_result.dig(:application, :applied)
+  end
+
+  def self.run_coop_battle(state, scene: nil, visual: true)
+    return false unless qa_2v2? && state["participants"].length == 2 &&
+      (state["event"] == 9000 || state["prototype"] == "personal2v2-v1")
     @active_battle = state["battle"]
     @battle_seq = 0
     @battle_failure = nil
@@ -140,10 +148,22 @@ module AnilCoop
     p2 = [enemy, Marshal.load(Marshal.dump(enemy))]
     p2[1].personalID = 3002
     raise BattleStopped, "enemy clone aliases moves" if p2[0].moves[0].equal?(p2[1].moves[0])
+    enemy_origins = [0, 0]
+    if state["enemy_team"]
+      data = state.fetch("enemy_trainer")
+      foe = NPCTrainer.new(data["name"], data["trainer_type"].to_sym)
+      foe.id, foe.language = data["id"], data["language"]
+      p2 = state["enemy_team"].map { |p| team_pokemon(p) }
+      enemy_origins = (0...p2.length).to_a
+      if p2.length == 1
+        p2 << Marshal.load(Marshal.dump(p2[0]))
+        enemy_origins << 0
+      end
+    end
     foe.party = p2
     scene ||= BattleCreationHelperMethods.create_battle_scene
     local_index = state["participants"].index { |p| p["id"] == @id } * 2
-    battle = AnilCoopBattle.new(scene, p1, p2, trainers, [foe], local_index, state["seed"], team_sizes: team_sizes, personal: personal)
+    battle = AnilCoopBattle.new(scene, p1, p2, trainers, [foe], local_index, state["seed"], team_sizes: team_sizes, personal: personal, enemy_origins: enemy_origins)
     if personal
       supplied.each_with_index do |data, i|
         p1[battle.coop_owned_indices[i]].expshare = originals[0].party[data["slot"]].expshare
@@ -184,8 +204,8 @@ module AnilCoop
     $player, $PokemonGlobal, $bag, $stats = originals if originals
     begin
       if result_plan && @battle_completed && @last_qa_result && @last_qa_result[:completed]
-        @last_qa_result[:application] = apply_personal_result(result_plan, battle.pbParty(0), battle.decision)
-        @last_personal_application = [result_plan, battle.pbParty(0), battle.decision]
+        @last_qa_result[:application] = apply_personal_result(result_plan, battle.pbParty(0), battle.decision, money: state["enemy_team"] ? battle.coop_money : 0)
+        @last_personal_application = [result_plan, battle.pbParty(0), battle.decision, state["enemy_team"] ? battle.coop_money : 0]
       end
     rescue StandardError => e
       @last_qa_result[:error] = "result application: #{e.message}"
@@ -198,7 +218,7 @@ module AnilCoop
 end
 
 class AnilCoopBattle < Battle
-  def initialize(scene, allies, foes, trainers, opponents, local_index, seed, team_sizes: [2, 2], personal: false)
+  def initialize(scene, allies, foes, trainers, opponents, local_index, seed, team_sizes: [2, 2], personal: false, enemy_origins: [0, 0])
     @coop_local = local_index
     @coop_team_sizes = team_sizes
     @coop_personal = personal
@@ -214,7 +234,7 @@ class AnilCoopBattle < Battle
     @ally_items = [[], []]
     @z_rng = ZCable::BattleRNG.new(seed)
     # Both QA foes originate from one trainer Pokémon. Never award its EXP twice.
-    @coop_enemy_origins = [0, 0]
+    @coop_enemy_origins = enemy_origins
     @coop_defeated = {}
     @coop_rewards_applied = false
   end
@@ -283,6 +303,14 @@ class AnilCoopBattle < Battle
   ensure
     @coop_reward_owner = false
   end
+  def coop_money
+    return 0 unless @decision == 1
+    amount = @opponent[0].base_money * @party2.map(&:level).max
+    used = @coop_defeated.values.flat_map(&:participants).uniq & coop_owned_indices
+    amount *= 2 if used.any? { |i| [:AMULETCOIN, :LUCKINCENSE].include?(@initialItems[0][i]) }
+    amount
+  end
+
   def pbGainMoney; end
   def pbLoseMoney; end
 

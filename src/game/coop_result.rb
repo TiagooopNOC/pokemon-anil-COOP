@@ -37,6 +37,8 @@ module AnilCoop
     { battle: battle_id, player: original_player, global: original_global,
       player_id: original_player.id, party: party, party_bytes: party.map { |p| Marshal.dump(p) },
       selected: selected, offset: sizes.take(index).sum, team_sizes: sizes.dup,
+      encounter: state["enemy_team"] ? state["encounter_key"] : nil,
+      trainer_bytes: Marshal.dump(original_global.anil_coop_trainers),
       money: original_player.money, receipt_bytes: Marshal.dump(receipts) }
   end
 
@@ -76,7 +78,7 @@ module AnilCoop
     receipts = $PokemonGlobal.anil_coop_receipts
     raise "Registro de resultados inválido" unless receipts.nil? || receipts.is_a?(Hash)
     expected_receipt = { player_id: plan[:player_id], decision: decision,
-                         keys: plan[:selected].map { |s| s[:key] }, money: money }
+                         keys: plan[:selected].map { |s| s[:key] }, money: money, encounter: plan[:encounter] }
     if receipts && receipts.key?(plan[:battle])
       raise "Resultado repetido contradictorio" unless receipts[plan[:battle]] == expected_receipt
       return false
@@ -86,7 +88,8 @@ module AnilCoop
     raise "Equipo cambiado durante el combate" unless $player.party.length == plan[:party].length &&
       $player.party.each_with_index.all? { |p, i| p.equal?(plan[:party][i]) && Marshal.dump(p) == plan[:party_bytes][i] }
     raise "Perfil modificado durante el combate" unless $player.money == plan[:money] &&
-      Marshal.dump(receipts) == plan[:receipt_bytes]
+      Marshal.dump(receipts) == plan[:receipt_bytes] &&
+      Marshal.dump($PokemonGlobal.anil_coop_trainers) == plan[:trainer_bytes]
     raise "Equipo final incompleto" unless battle_party.is_a?(Array) && battle_party.length == plan[:team_sizes].sum
     prepared = plan[:selected].each_with_index.map do |selection, i|
       prepare_personal_result(plan[:party_bytes][selection[:slot]],
@@ -99,6 +102,7 @@ module AnilCoop
     end
     receipt_defined = $PokemonGlobal.instance_variable_defined?(:@anil_coop_receipts)
     old_money = $player.money
+    old_trainers = $PokemonGlobal.anil_coop_trainers
     begin
       plan[:selected].each_with_index do |selection, i|
         target = selection[:pokemon]
@@ -116,6 +120,9 @@ module AnilCoop
         selected_slots.include?(i) || Marshal.dump(p) == plan[:party_bytes][i] }
       raise "Se alteró un Pokémon no seleccionado" unless untouched
       $player.money = old_money + money if money > 0
+      if decision == 1 && plan[:encounter]
+        $PokemonGlobal.anil_coop_trainers = (old_trainers || {}).merge(plan[:encounter] => true)
+      end
       $PokemonGlobal.anil_coop_receipts = (receipts || {}).merge(plan[:battle] => expected_receipt)
     rescue Exception
       # Restore the same Pokemon objects, including their original nested references.
@@ -124,6 +131,7 @@ module AnilCoop
         (target.instance_variables - backups[i].keys).each { |field| target.remove_instance_variable(field) }
         backups[i].each { |field, value| target.instance_variable_set(field, value) }
       end
+      $PokemonGlobal.anil_coop_trainers = old_trainers
       $player.instance_variable_set(:@money, old_money)
       if receipt_defined
         $PokemonGlobal.anil_coop_receipts = receipts

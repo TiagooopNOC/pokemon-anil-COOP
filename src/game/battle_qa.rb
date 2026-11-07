@@ -44,7 +44,11 @@ module AnilCoopQA
     wait_until { AnilCoop.connected? && AnilCoop.instance_variable_get(:@peers).length == 1 }
     AnilCoop.qa_trainer
     event = $game_map.events.fetch(9000)
-    AnilCoop.trainer_send("trainer_wait", event, forced: false, prototype: AnilCoop.battle_prototype)
+    lobby_extra = { forced: false, prototype: AnilCoop.battle_prototype }
+    if scenario == "personal-npc"
+      lobby_extra[:encounter_key] = AnilCoop.trainer_identity(event, [:AZUL1, "Azul", 1])
+    end
+    AnilCoop.trainer_send("trainer_wait", event, lobby_extra)
     key = [event.map_id, event.id]
     wait_until do
       state = AnilCoop.instance_variable_get(:@trainer_states)[key]
@@ -62,24 +66,29 @@ module AnilCoopQA
     my_id = AnilCoop.instance_variable_get(:@id)
     remote_id = state["participants"].find { |p| p["id"] != my_id }["id"]
     remote_before = AnilCoop.instance_variable_get(:@peers)[remote_id]["position"].dup
-    AnilCoop.trainer_send("trainer_start", event, solo: false) if state["host"] == AnilCoop.instance_variable_get(:@id)
+    if state["host"] == AnilCoop.instance_variable_get(:@id)
+      AnilCoop.send_trainer_foe(event, [:AZUL1, "Azul", 1]) if scenario == "personal-npc"
+      AnilCoop.trainer_send("trainer_start", event, solo: false)
+    end
     wait_until { AnilCoop.instance_variable_get(:@trainer_states)[key]&.dig("phase") == "locked" }
     state = AnilCoop.instance_variable_get(:@trainer_states)[key]
     visual = ENV["ANIL_COOP_QA_BOT"] == "visual"
     scene = visual ? AnilCoopQA::VisualScene.new : AnilCoopQA::EngineScene.new
+    before_money = $player.money
     before_exp = $player.party.map(&:exp)
     AnilCoop.qa_coop_battle(state, scene: scene, visual: visual)
     personal_exp = $player.party.each_with_index.map { |p, i| p.exp - before_exp[i] }
     result = AnilCoop.instance_variable_get(:@last_qa_result) || { error: "no result" }
     10.times { Graphics.update; AnilCoop.tick($scene) }
+    result[:personal_money_delta] = $player.money - before_money
     result[:personal_exp_delta] = personal_exp if AnilCoop.personal_team?
     result[:connected_after] = AnilCoop.connected?
     result[:save_unchanged] = before == Digest::SHA256.file(path).hexdigest
     result[:scene_map] = $scene.is_a?(Scene_Map) && !$game_temp.in_battle
     if result[:completed] && AnilCoop.personal_team?
-      plan, party, decision = AnilCoop.instance_variable_get(:@last_personal_application)
+      plan, party, decision, money = AnilCoop.instance_variable_get(:@last_personal_application)
       before_replay = Marshal.dump($player.party)
-      replay = AnilCoop.apply_personal_result(plan, party, decision)
+      replay = AnilCoop.apply_personal_result(plan, party, decision, money: money || 0)
       result[:personal_replay_safe] = replay == false && before_replay == Marshal.dump($player.party)
       # New QA-only file; never overwrite Partida 1 or another existing save.
       saved = File.join(AnilCoopDev::PROFILE, "qa-personal-#{state['battle']}.rxdata")
@@ -105,7 +114,8 @@ module AnilCoopQA
       # Every other Pokemon instance variable still has to survive identically.
       result[:personal_save_reload] = diffs.all? { |row| row[1] == :@last_update_time } &&
         $PokemonGlobal.anil_coop_receipts.key?(state["battle"])
-      result[:reload_replay_safe] = AnilCoop.apply_personal_result(plan, party, decision) == false
+      result[:trainer_completed] = AnilCoop.trainer_completed?(state["encounter_key"]) if state["encounter_key"]
+      result[:reload_replay_safe] = AnilCoop.apply_personal_result(plan, party, decision, money: money || 0) == false
     end
     if result[:completed]
       delta = state["host"] == my_id ? 1 : 2
@@ -152,6 +162,8 @@ module AnilCoopQA
                       result[:save_unchanged] && result[:scene_map]
     elsif scenario == "status"
       result[:pass] &&= result.dig(:observed, :poison) && result.dig(:observed, :item_consumed)
+    elsif scenario == "personal-npc"
+      result[:pass] &&= result[:trainer_completed] && result[:personal_money_delta] > 0
     elsif scenario == "personal-share"
       delta = result[:personal_exp_delta]
       result[:pass] &&= [1, 3, 5].all? { |i| delta[i] == 0 } && delta[2] > 0 && delta[4] > 0 &&

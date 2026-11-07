@@ -166,6 +166,7 @@ class PersonalSnapshotTests(unittest.TestCase):
         self.assertTrue(validate_team([personal_pokemon(i) for i in (5, 2, 0)]))
         self.assertFalse(validate_team([]))
         self.assertFalse(validate_team([personal_pokemon(i) for i in range(4)]))
+        self.assertTrue(validate_team([personal_pokemon(i) for i in range(6)], max_size=6))
         self.assertFalse(validate_team([personal_pokemon(), personal_pokemon()]))
         for field, value in (("pid", True), ("hp", 32), ("slot", 6), ("key", "100:999"),
                              ("species", "../../game"), ("iv", [31] * 7),
@@ -251,6 +252,63 @@ class PersonalLobbyTests(unittest.TestCase):
         self.assertEqual(state["phase"], "locked")
         self.assertIsNone(state["battle"])
         self.assertNotIn("selected_teams", state)
+
+
+class RealTrainerLobbyTests(unittest.TestCase):
+    team = PersonalLobbyTests.team
+
+    def call(self, i, kind, **extra):
+        extra.setdefault("event", self.event)
+        return BattleLobbyTests.call(self, i, kind, **extra)
+
+    def setUp(self):
+        self.event = 9000
+        BattleLobbyTests.setUp(self)
+        self.call(0, "trainer_cancel")
+        self.call(1, "trainer_cancel")
+        self.event = 42
+        for i in (0, 1):
+            self.call(i, "trainer_wait", forced=False, prototype=PERSONAL_PROTOTYPE, encounter_key="a" * 64)
+            self.team(i, (0, 1, 2))
+            self.call(i, "trainer_ready", ready=True)
+
+    def foe(self, i, team=None):
+        return self.call(i, "trainer_foe", team=team or [personal_pokemon()], trainer=personal_trainer())
+
+    def test_host_freezes_effective_foes_and_only_participants_receive_them(self):
+        self.assertEqual(self.call(0, "trainer_start", solo=False)["reason"], "trainer_foe_required")
+        self.assertEqual(self.foe(1)["reason"], "trainer_not_host")
+        self.assertEqual(self.foe(2)["reason"], "no_trainer_wait")
+        self.assertEqual(self.foe(0, [personal_pokemon(i) for i in range(7)])["reason"], "invalid_trainer_foe")
+        team = [personal_pokemon(i) for i in range(6)]
+        pending = self.foe(0, team)
+        self.assertNotIn("enemy_team", pending)
+        self.assertEqual(self.foe(0, team)["phase"], "pending")  # Idempotent snapshot retry.
+        team[0]["hp"] = 1
+        self.assertEqual(self.foe(0, team)["reason"], "trainer_foe_fixed")
+        locked = self.call(0, "trainer_start", solo=False)
+        self.assertEqual(locked["encounter_key"], "a" * 64)
+        self.assertEqual(len(locked["enemy_team"]), 6)
+        self.assertEqual(locked["enemy_team"][0]["hp"], 31)
+        self.assertEqual(locked["enemy_trainer"], personal_trainer())
+        self.assertEqual(self.peers[1].messages[-1]["enemy_team"], locked["enemy_team"])
+        self.assertNotIn("enemy_team", self.peers[2].messages[-1])
+        self.assertEqual(self.foe(0)["reason"], "trainer_locked")
+        self.assertLess(len(json.dumps(locked).encode()), 32768)
+
+    def test_event_revision_mismatch_is_rejected_before_joining(self):
+        request = dict(forced=False, prototype=PERSONAL_PROTOTYPE)
+        self.assertEqual(self.call(2, "trainer_wait", **request)["reason"], "trainer_encounter_key")
+        self.assertEqual(self.call(2, "trainer_wait", encounter_key="b" * 64, **request)["reason"], "trainer_incompatible")
+        self.assertEqual(self.call(2, "trainer_wait", forced=False, prototype=PROTOTYPE)["reason"], "trainer_prototype")
+        state = self.call(2, "trainer_wait", encounter_key="a" * 64, **request)
+        self.assertEqual(len(state["participants"]), 3)
+
+    def test_solo_does_not_need_remote_foe_snapshot(self):
+        state = self.call(0, "trainer_start", solo=True)
+        self.assertEqual(state["phase"], "locked")
+        self.assertIsNone(state["battle"])
+        self.assertNotIn("enemy_team", state)
 
 
 if __name__ == "__main__":
