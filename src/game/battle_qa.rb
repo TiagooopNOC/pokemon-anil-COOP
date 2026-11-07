@@ -68,6 +68,26 @@ module AnilCoopQA
     result[:connected_after] = AnilCoop.connected?
     result[:save_unchanged] = before == Digest::SHA256.file(path).hexdigest
     result[:scene_map] = $scene.is_a?(Scene_Map) && !$game_temp.in_battle
+    if result[:completed] && AnilCoop.personal_team?
+      plan, party, decision = AnilCoop.instance_variable_get(:@last_personal_application)
+      before_replay = Marshal.dump($player.party)
+      replay = AnilCoop.apply_personal_result(plan, party, decision)
+      result[:personal_replay_safe] = replay == false && before_replay == Marshal.dump($player.party)
+      # New QA-only file; never overwrite Partida 1 or another existing save.
+      saved = File.join(AnilCoopDev::PROFILE, "qa-personal-#{state['battle']}.rxdata")
+      raise "QA save already exists" if File.exist?(saved)
+      SaveData.save_to_file(saved)
+      expected_party = Marshal.dump($player.party)
+      $scene.disposeSpritesets
+      data = SaveData.get_data_from_file(saved)
+      SaveData.load_bootup_values(data)
+      Game.load(data)
+      $scene.createSpritesets
+      Graphics.transition(0)
+      result[:personal_save_reload] = expected_party == Marshal.dump($player.party) &&
+        $PokemonGlobal.anil_coop_receipts.key?(state["battle"])
+      result[:reload_replay_safe] = AnilCoop.apply_personal_result(plan, party, decision) == false
+    end
     if result[:completed]
       delta = state["host"] == my_id ? 1 : 2
       $game_player.moveto($game_player.x, $game_player.y + delta)
@@ -101,6 +121,10 @@ module AnilCoopQA
     result[:pass] = result[:completed] && result[:decision] == (scenario == "loss" ? 2 : 1) &&
                     result[:connected_after] && result[:save_unchanged] && result[:scene_map] && result[:peer_visible_after]
     result[:pass] &&= result[:map_rendered] if visual
+    if AnilCoop.personal_team?
+      result[:pass] &&= result.dig(:application, :applied) && result.dig(:application, :unselected_unchanged) &&
+        result[:personal_replay_safe] && result[:personal_save_reload] && result[:reload_replay_safe]
+    end
     if scenario == "disconnect"
       result[:pass] = !result[:completed] && result[:error].to_s.match?(/connection lost|battle_disconnect/) &&
                       result[:save_unchanged] && result[:scene_map]

@@ -3,6 +3,7 @@ File.open(log_path, "a") { |f| f.puts("#{Time.now.utc} postload reached; scene=#
 begin
   load "CoopDev/coop.rb"
   load "CoopDev/coop_team.rb"
+  load "CoopDev/coop_result.rb"
   load "CoopDev/coop_battle.rb"
   load "CoopDev/battle_qa.rb" if ENV["ANIL_COOP_QA_BOT"]
   File.open(log_path, "a") { |f| f.puts("#{Time.now.utc} presence script loaded") }

@@ -97,8 +97,9 @@ module AnilCoop
     @last_qa_result = nil
     # Trusted local copies protect personal objects even if a plugin accesses globals.
     originals = [$player, $PokemonGlobal, $bag, $stats]
-    $player, $PokemonGlobal, $bag, $stats = Marshal.load(Marshal.dump(originals))
     personal = state["prototype"] == "personal2v2-v1"
+    result_plan = capture_result_plan(state, originals[0], originals[1]) if personal
+    $player, $PokemonGlobal, $bag, $stats = Marshal.load(Marshal.dump(originals))
     names = state["participants"].map { |p| p["name"] }
     # Use the current, known valid trainer type for both test trainers.
     trainers = names.map { |n| NPCTrainer.new(n, $player.trainer_type) }
@@ -140,6 +141,11 @@ module AnilCoop
     scene ||= BattleCreationHelperMethods.create_battle_scene
     local_index = state["participants"].index { |p| p["id"] == @id } * 2
     battle = AnilCoopBattle.new(scene, p1, p2, trainers, [foe], local_index, state["seed"], team_sizes: team_sizes, personal: personal)
+    if personal
+      supplied.each_with_index do |data, i|
+        p1[battle.coop_owned_indices[i]].expshare = originals[0].party[data["slot"]].expshare
+      end
+    end
     battle_barrier("setup", battle.coop_digest)
     log("2v2 begin owned=#{local_index} temporary_teams=#{!personal}")
     battle_error = nil
@@ -173,7 +179,18 @@ module AnilCoop
       network
     end
     $player, $PokemonGlobal, $bag, $stats = originals if originals
-    @active_battle = @battle_failure = @battle_reply = nil
+    begin
+      if result_plan && @battle_completed && @last_qa_result && @last_qa_result[:completed]
+        @last_qa_result[:application] = apply_personal_result(result_plan, battle.pbParty(0), battle.decision)
+        @last_personal_application = [result_plan, battle.pbParty(0), battle.decision]
+      end
+    rescue StandardError => e
+      @last_qa_result[:error] = "result application: #{e.message}"
+      @last_qa_result[:completed] = false
+      log(@last_qa_result[:error])
+    ensure
+      @active_battle = @battle_failure = @battle_reply = nil
+    end
   end
 end
 
@@ -236,11 +253,19 @@ class AnilCoopBattle < Battle
     before = @party1.map { |p| [p.exp, p.level] }
     other = @party1.each_index.to_a - owned
     remote_before = Marshal.dump(other.map { |i| @party1[i] })
+    no_exp = @coop_personal && defined?(NO_EXP_SWITCH) && $game_switches[NO_EXP_SWITCH]
+    exp_all = @coop_personal && ($player.has_exp_all || $bag.has?(:EXPALL))
+    exp_share = owned.select do |i|
+      p = @party1[i]
+      @coop_personal && !exp_all && p.able? && (p.expshare || p.hasItem?(:EXPSHARE) || @initialItems[0][i] == :EXPSHARE)
+    end
     @coop_defeated.each_value do |foe|
-      eligible = foe.participants.select { |i| owned.include?(i) && @party1[i].able? }
-      eligible.each do |i|
+      next if no_exp
+      participants = foe.participants.select { |i| owned.include?(i) && @party1[i].able? }
+      owned.each do |i|
+        next unless @party1[i].able? && (participants.include?(i) || exp_share.include?(i) || exp_all)
         pbGainEVsOne(i, foe)
-        pbGainExpOne(i, foe, eligible.length, [], false)
+        pbGainExpOne(i, foe, participants.length, exp_share, exp_all)
       end
     end
     raise AnilCoop::BattleStopped, "reward changed remote team" unless
