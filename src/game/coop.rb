@@ -242,6 +242,41 @@ module AnilCoop
     qa_coop_battle(state)
   end
 
+  # Native windows and normal input; automatically leave the menu when the host starts.
+  def self.trainer_choice(key, text, commands)
+    status = Window_AdvancedTextPokemon.new(text)
+    status.width = Graphics.width
+    status.height = 112
+    status.z = 99998
+    menu = Window_CommandPokemon.new(commands)
+    menu.width = Graphics.width
+    menu.height = Graphics.height - status.height
+    menu.y = status.height
+    menu.z = 99999
+    menu.index = [@trainer_menu_index || 0, commands.length - 1].min
+    before = @trainer_states[key]
+    loop do
+      Graphics.update
+      Input.update
+      status.update
+      menu.update
+      tick($scene)
+      return :refresh unless @trainer_states[key].equal?(before)
+      if block_given?
+        programmed = yield
+        return programmed unless programmed.nil?
+      end
+      if Input.trigger?(Input::USE)
+        @trainer_menu_index = menu.index
+        return menu.index
+      end
+      return -1 if Input.trigger?(Input::BACK)
+    end
+  ensure
+    menu&.dispose
+    status&.dispose
+  end
+
   def self.trainer_lobby(event, forced, trainer_args = nil)
     key = [event.map_id, event.id]
     @trainer_states.delete(key)
@@ -274,7 +309,8 @@ module AnilCoop
       commands += ["Confirmar con listos", "Combatir solo"] if host
       commands << "Elegir Pokémon" if personal_team?
       commands << (forced ? "Seguir esperando" : "Salir de la espera")
-      choice = pbMessage("Entrenador en espera.\n#{lines.join(" / ")}", commands, -1) { network }
+      choice = trainer_choice(key, "Entrenador en espera.\n#{lines.join(" / ")}", commands)
+      next if choice == :refresh
       next if @trainer_states[key] && @trainer_states[key]["phase"] != "pending"
       if personal_team? && choice == commands.length - 2
         choose_team(event)

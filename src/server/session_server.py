@@ -144,7 +144,7 @@ class State:
                 if prototype not in (None, PROTOTYPE, PERSONAL_PROTOTYPE) or (prototype == PROTOTYPE and event_id != 9000):
                     return {"type": "error", "reason": "trainer_prototype"}, identity
                 encounter_key = message.get("encounter_key")
-                if prototype == PERSONAL_PROTOTYPE and event_id != 9000:
+                if prototype == PERSONAL_PROTOTYPE and (event_id != 9000 or encounter_key is not None):
                     if not isinstance(encounter_key, str) or not DIGEST.fullmatch(encounter_key):
                         return {"type": "error", "reason": "trainer_encounter_key"}, identity
                 elif encounter_key is not None:

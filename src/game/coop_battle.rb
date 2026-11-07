@@ -89,7 +89,12 @@ module AnilCoop
 
   def self.qa_coop_battle(state, scene: nil, visual: true)
     @last_qa_result = nil
+    outcome_variable = $game_temp.battle_rules["outcomeVar"] || 1
     run_coop_battle(state, scene: scene, visual: visual)
+    if state["enemy_team"] && @last_qa_result && @last_qa_result[:completed]
+      BattleCreationHelperMethods.set_outcome(@last_qa_result[:decision], outcome_variable, true)
+    end
+    $game_temp.clear_battle_rules
     state["prototype"] == "personal2v2-v1" && @last_qa_result &&
       @last_qa_result[:completed] && @last_qa_result[:decision] == 1 && @last_qa_result.dig(:application, :applied)
   end
@@ -320,8 +325,8 @@ class AnilCoopBattle < Battle
   end
 
   def pbRunMenu(_index)
-    AnilCoop.queue(type: "battle_abort", battle: AnilCoop.instance_variable_get(:@active_battle))
-    raise AnilCoop::BattleStopped, "cancelled locally"
+    pbDisplayPaused("No puedes huir de un combate contra un entrenador.")
+    false
   end
 
   # Hash only canonical engine state; local UI ownership must not enter the digest.

@@ -112,6 +112,14 @@ class BattleLobbyTests(unittest.TestCase):
             peer.messages.clear()
         return self.state.rooms["BATTLE1"]["trainers"]["28:9000"]["battle"]
 
+    def test_qa_event_accepts_valid_personal_encounter_identity(self):
+        self.call(0, "trainer_cancel")
+        self.call(1, "trainer_cancel")
+        state = self.call(0, "trainer_wait", forced=False, prototype=PERSONAL_PROTOTYPE, encounter_key="a" * 64)
+        self.assertEqual(state["encounter_key"], "a" * 64)
+        self.assertEqual(self.call(1, "trainer_wait", forced=False, prototype=PERSONAL_PROTOTYPE,
+                                   encounter_key="bad")["reason"], "trainer_encounter_key")
+
     def test_requires_capability_and_ready_host(self):
         self.call(1, "trainer_wait", forced=False)  # old client loses capability
         self.call(1, "trainer_ready", ready=True)
