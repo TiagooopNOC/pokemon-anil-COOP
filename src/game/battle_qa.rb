@@ -20,7 +20,7 @@ module AnilCoopQA
     save_data = SaveData.get_data_from_file(path) # no conversion/write-back
     SaveData.load_bootup_values(save_data)
     Game.load(save_data)
-    if scenario == "personal-reserves"
+    if ["personal-reserves", "personal-share"].include?(scenario)
       # Explicit synthetic six-slot QA party, only in RAM; never a fallback for users.
       source = $player.party.fetch(0)
       $player.party = Array.new(6) do |i|
@@ -28,8 +28,13 @@ module AnilCoopQA
         p.personalID = (source.personalID + 10000 + i) % (2**32)
         p.calc_stats
         p.heal
-        p.hp = 1 if [0, 2].include?(i)
+        p.hp = 1 if scenario == "personal-reserves" && [0, 2].include?(i)
         p
+      end
+      if scenario == "personal-share"
+        $player.has_exp_all = ENV["ANIL_COOP_NAME"] == "client03"
+        $player.party.each { |p| p.expshare = false }
+        $player.party[4].expshare = true unless $player.has_exp_all
       end
       AnilCoop.log("QA synthetic six-slot party; selecting [2,0,4]")
     end
@@ -46,7 +51,7 @@ module AnilCoopQA
       state && state["participants"].any? { |p| p["id"] == AnilCoop.instance_variable_get(:@id) }
     end
     if AnilCoop.personal_team?
-      AnilCoop.trainer_send("trainer_team", event, team: AnilCoop.select_team(scenario == "personal-reserves" ? [2, 0, 4] : [0]), trainer: AnilCoop.trainer_snapshot)
+      AnilCoop.trainer_send("trainer_team", event, team: AnilCoop.select_team(["personal-reserves", "personal-share"].include?(scenario) ? [2, 0, 4] : [0]), trainer: AnilCoop.trainer_snapshot)
     end
     AnilCoop.trainer_send("trainer_ready", event, ready: true)
     wait_until do
@@ -62,9 +67,12 @@ module AnilCoopQA
     state = AnilCoop.instance_variable_get(:@trainer_states)[key]
     visual = ENV["ANIL_COOP_QA_BOT"] == "visual"
     scene = visual ? AnilCoopQA::VisualScene.new : AnilCoopQA::EngineScene.new
+    before_exp = $player.party.map(&:exp)
     AnilCoop.qa_coop_battle(state, scene: scene, visual: visual)
+    personal_exp = $player.party.each_with_index.map { |p, i| p.exp - before_exp[i] }
     result = AnilCoop.instance_variable_get(:@last_qa_result) || { error: "no result" }
     10.times { Graphics.update; AnilCoop.tick($scene) }
+    result[:personal_exp_delta] = personal_exp if AnilCoop.personal_team?
     result[:connected_after] = AnilCoop.connected?
     result[:save_unchanged] = before == Digest::SHA256.file(path).hexdigest
     result[:scene_map] = $scene.is_a?(Scene_Map) && !$game_temp.in_battle
@@ -84,7 +92,18 @@ module AnilCoopQA
       Game.load(data)
       $scene.createSpritesets
       Graphics.transition(0)
-      result[:personal_save_reload] = expected_party == Marshal.dump($player.party) &&
+      expected_objects = Marshal.load(expected_party)
+      diffs = expected_objects.each_with_index.flat_map do |old, i|
+        now = $player.party[i]
+        (old.instance_variables | now.instance_variables).filter_map do |key|
+          a, b = old.instance_variable_get(key), now.instance_variable_get(key)
+          [i, key, a.inspect, b.inspect] unless Marshal.dump(a) == Marshal.dump(b)
+        end
+      end
+      result[:reload_differences] = diffs
+      # LBDSKY refreshes its party-time measurement clock while rebuilding the map.
+      # Every other Pokemon instance variable still has to survive identically.
+      result[:personal_save_reload] = diffs.all? { |row| row[1] == :@last_update_time } &&
         $PokemonGlobal.anil_coop_receipts.key?(state["battle"])
       result[:reload_replay_safe] = AnilCoop.apply_personal_result(plan, party, decision) == false
     end
@@ -133,6 +152,10 @@ module AnilCoopQA
                       result[:save_unchanged] && result[:scene_map]
     elsif scenario == "status"
       result[:pass] &&= result.dig(:observed, :poison) && result.dig(:observed, :item_consumed)
+    elsif scenario == "personal-share"
+      delta = result[:personal_exp_delta]
+      result[:pass] &&= [1, 3, 5].all? { |i| delta[i] == 0 } && delta[2] > 0 && delta[4] > 0 &&
+        (ENV["ANIL_COOP_NAME"] == "client03" ? delta[0] > 0 : delta[0] == 0)
     elsif scenario == "personal-reserves"
       result[:pass] &&= result.dig(:observed, :voluntary_switch) && result.dig(:observed, :forced_replacement)
     elsif scenario == "switch"
@@ -310,7 +333,9 @@ module AnilCoopQA
   module Fixtures
     def test_pokemon(species, owner, pid, moves, ability)
       pkmn = super
-      if AnilCoopQA.scenario == "loss" && pid == 3001
+      if AnilCoopQA.scenario == "personal-share" && pid == 3001
+        pkmn.moves = [Pokemon::Move.new(:SPLASH)]
+      elsif AnilCoopQA.scenario == "loss" && pid == 3001
         pkmn.level = 40
         pkmn.calc_stats
         pkmn.heal

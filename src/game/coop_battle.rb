@@ -100,6 +100,9 @@ module AnilCoop
     personal = state["prototype"] == "personal2v2-v1"
     result_plan = capture_result_plan(state, originals[0], originals[1]) if personal
     $player, $PokemonGlobal, $bag, $stats = Marshal.load(Marshal.dump(originals))
+    # Legacy QA challenge profiles may predate the encounter ledger initialization.
+    # Native scene hooks consult it even for trainer battles. Only repair the copy.
+    $PokemonGlobal.challenge_encs ||= {} if $PokemonGlobal.respond_to?(:challenge_encs)
     names = state["participants"].map { |p| p["name"] }
     # Use the current, known valid trainer type for both test trainers.
     trainers = names.map { |n| NPCTrainer.new(n, $player.trainer_type) }
@@ -283,6 +286,11 @@ class AnilCoopBattle < Battle
   def pbGainMoney; end
   def pbLoseMoney; end
 
+  def pbItemMenu(_index, _first_action)
+    pbDisplayPaused("Los objetos de bolsa aún no están habilitados en el combate cooperativo.")
+    false
+  end
+
   def pbRunMenu(_index)
     AnilCoop.queue(type: "battle_abort", battle: AnilCoop.instance_variable_get(:@active_battle))
     raise AnilCoop::BattleStopped, "cancelled locally"
@@ -395,11 +403,15 @@ class AnilCoopBattle < Battle
 
   def pbStartBattle
     super
-  rescue AnilCoop::BattleStopped, StandardError
+  rescue AnilCoop::BattleStopped, StandardError => error
     AnilCoop.instance_variable_set(:@battle_cleanup, true)
     @decision = 0
-    @scene.pbEndBattle(0)
-    raise
+    begin
+      @scene.pbEndBattle(0)
+    rescue StandardError => cleanup_error
+      AnilCoop.log("battle cleanup: #{cleanup_error.class}: #{cleanup_error.message}")
+    end
+    raise error
   end
 end
 

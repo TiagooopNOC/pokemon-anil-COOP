@@ -201,3 +201,17 @@ Guardados intactos en ambas pruebas. 17 tests específicos pasaron, incluyendo
 selección validada, propiedad de reservas y dos recorridos TCP. Menú humano y
 lanzadores Windows nuevos todavía pendientes de prueba. Historia individual es
 el requisito vigente; ningún interruptor de campaña se envía al servidor.
+
+### Persistencia individual y Repartir Exp. — 2026-11-06
+
+`SAVE003`: dos motores Wine, 3+3 sintético, cambios y sustituciones; resultado
+aplicado únicamente a los seleccionados. Guardado nativo en archivos QA nuevos,
+recarga con Game.load y repetición del resultado antes/después de recargar: PASS.
+Los tres excluidos conservaron sus atributos. La recarga actualiza únicamente
+`@last_update_time`, reloj de tiempo en equipo de LBDSKY; todos los demás atributos
+se compararon. Partida 1 sin cambios. `SHARE01`: EXP All de un propietario repartió
+35/17/17 a sus elegidos; reparto individual del otro dio 35/0/35. Cero EXP para
+los excluidos, persistencia y recibos antirrepetición pasaron. Estos recorridos
+usaron el motor real sin renderizado, no acciones humanas. Se corrigió además
+el ledger de encuentros ausente de perfiles QA antiguos, solo en la copia temporal
+usada por el combate, y el cierre ya preserva la causa original de un error.
