@@ -1,4 +1,4 @@
-# Experimental QA fixture only. No network Marshal, persistence or story hooks.
+# Two-owner trainer adapter with validated snapshots and local result receipts.
 require "digest"
 
 module AnilCoop
@@ -195,12 +195,12 @@ module AnilCoop
     @last_qa_result = { decision: battle.decision, completed: @battle_completed, rounds: battle.turnCount + 1 }
     @last_qa_result[:observed] = battle.qa_evidence if battle.respond_to?(:qa_evidence)
     @last_qa_result[:reward_preview] = battle.coop_reward_preview
-    log("2v2 end decision=#{battle.decision} (temporary reward preview discarded; no persistence or story)")
+    log("2v2 end decision=#{battle.decision} personal=#{personal} agreed=#{@battle_completed}")
     false
   rescue BattleStopped, StandardError => e
     @last_qa_result = { error: "#{e.class}: #{e.message}", completed: false }
     log("2v2 stopped #{e.class}: #{e.message}\n#{e.backtrace&.first(6)&.join("\n")}")
-    pbMessage("Prueba 2v2 detenida: #{e.message}. No se guardaron resultados.") unless @qa_automation
+    pbMessage("Combate cooperativo detenido: #{e.message}. No se guardaron resultados.") unless @qa_automation
     false
   ensure
     if @active_battle && !@battle_completed

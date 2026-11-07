@@ -215,3 +215,21 @@ los excluidos, persistencia y recibos antirrepetición pasaron. Estos recorridos
 usaron el motor real sin renderizado, no acciones humanas. Se corrigió además
 el ledger de encuentros ausente de perfiles QA antiguos, solo en la copia temporal
 usada por el combate, y el cierre ya preserva la causa original de un error.
+
+### Evento de entrenador y alfa — 2026-11-07
+
+`EVENT04`: dos Game.exe reales bajo Wine, escena gráfica, intérprete de eventos
+nativo y menú de espera nativo con decisiones programadas. NPC QA con equipo
+real de Azul generado por TrainerBattle; no es un recorrido humano de un NPC
+del mapa original. Seis rondas, victoria en ambos, 35 EXP y 500 de dinero propios,
+interruptor local A del evento y ledger de victoria, recibo sin doble aplicación,
+regreso al mapa renderizado y posiciones remotas recibidas. Partida 1 intacta.
+Reporte privado `anil-wine-b8d50be09818450b95b38927a933e311.json` y capturas
+`qa-2v2-lobby.png`/`qa-2v2-map.png` en los perfiles. `EVENT03` también terminó y
+regresó conectado, pero perdió contra el equipo generado por el iniciador
+Randomlocke: no concedió dinero ni victoria; no cuenta como prueba de victoria.
+Se corrigió una carrera que aceptaba el roster antes del propio ingreso. El menú
+ahora actualiza la sala y entra al combate sin requerir «Actualizar» del invitado.
+Tres tests específicos de NPC (identidad, equipo enemigo congelado, solo) pasaron;
+tres del lanzador y dos del empaquetado también. No se repitieron 3+3/Repartir Exp.
+Queda pendiente recorrer NPC originales con controles humanos en dos PCs/Windows.

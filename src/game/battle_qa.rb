@@ -51,6 +51,11 @@ module AnilCoopQA
     before_exp = $player.party.map(&:exp)
     visual = ENV["ANIL_COOP_QA_BOT"] == "visual"
     if scenario == "personal-event"
+      # Fix only the QA encounter initiator, so this victory scenario uses the
+      # Normal profile's native Azul team rather than a random host race.
+      if ENV["ANIL_COOP_NAME"] == "client04"
+        wait_until { AnilCoop.instance_variable_get(:@trainer_states)[[event.map_id, event.id]]&.dig("phase") == "pending" }
+      end
       my_id = AnilCoop.instance_variable_get(:@id)
       remote_id = AnilCoop.instance_variable_get(:@peers).keys.first
       remote_before = AnilCoop.instance_variable_get(:@peers)[remote_id]["position"].dup
