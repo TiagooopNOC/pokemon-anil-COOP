@@ -100,21 +100,21 @@ module AnilCoop
         "#{order ? "#{order + 1}. " : ""}#{p.name} Nv.#{p.level} PS #{p.hp}/#{p.totalhp}"
       end
       choice = pbMessage("Elegí 1–3 Pokémon en orden. Volvé a elegir uno para quitarlo.",
-                         labels + ["Confirmar equipo", "Cancelar"], -1) { network }
+                         labels + ["Confirmar equipo", "Cancelar"], -1) { battle_tick }
       return false if choice < 0 || choice == labels.length + 1
       if choice == labels.length
         begin
           trainer_send("trainer_team", event, team: select_team(chosen), trainer: trainer_snapshot)
           return true
         rescue StandardError => e
-          pbMessage(e.message) { network }
+          pbMessage(e.message) { battle_tick }
         end
       elsif chosen.include?(choice)
         chosen.delete(choice)
       elsif chosen.length < 3 && $player.party[choice]&.able? && !$player.party[choice].egg?
         chosen << choice
       else
-        pbMessage("Elegí hasta tres Pokémon utilizables.") { network }
+        pbMessage("Elegí hasta tres Pokémon utilizables.") { battle_tick }
       end
     end
   end

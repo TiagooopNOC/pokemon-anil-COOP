@@ -172,6 +172,7 @@ module AnilCoopQA
     end
     result[:kind] = visual ? "rendered_engine_programmed_orders" : "engine_without_battle_rendering"
     result[:scenario] = scenario
+    result[:menu_checks] = @menu_checks if @menu_checks
     result[:pass] = result[:completed] && result[:decision] == (scenario == "loss" ? 2 : 1) &&
                     result[:connected_after] && result[:save_unchanged] && result[:scene_map] && result[:peer_visible_after]
     result[:pass] &&= result[:map_rendered] if visual
@@ -179,9 +180,13 @@ module AnilCoopQA
       result[:pass] &&= result.dig(:application, :applied) && result.dig(:application, :unselected_unchanged) &&
         result[:personal_replay_safe] && result[:personal_save_reload] && result[:reload_replay_safe]
     end
-    if scenario == "disconnect"
+    if ["disconnect", "menu-disconnect"].include?(scenario)
       result[:pass] = !result[:completed] && result[:error].to_s.match?(/connection lost|battle_disconnect/) &&
                       result[:save_unchanged] && result[:scene_map]
+      if scenario == "menu-disconnect"
+        result[:pass] &&= result.dig(:menu_checks, :connected_after_35_seconds) &&
+          Array(AnilCoop.instance_variable_get(:@battle_menus)).empty?
+      end
     elsif scenario == "desync"
       result[:pass] = !result[:completed] && result[:error].to_s.include?("battle_desync") &&
                       result[:save_unchanged] && result[:scene_map]
@@ -324,6 +329,31 @@ module AnilCoopQA
 
     def pbCommandMenu(index, first_action)
       raise AnilCoop::BattleStopped, "QA exceeded 35 turns" if @turnCount >= 35
+      if @turnCount == 0 && AnilCoopQA.scenario == "menu-disconnect"
+        party = PokemonParty_Scene.new
+        displayed = pbPlayerDisplayParty(index)
+        party.pbStartScene(displayed, "Prueba de conexión en reservas")
+        summary = PokemonSummary_Scene.new
+        summary.pbStartScene(displayed, 0, true)
+        started = System.uptime
+        loop do
+          Graphics.update
+          party.update
+          summary.pbUpdate
+          elapsed = System.uptime - started
+          if elapsed >= 35
+            AnilCoopQA.instance_variable_set(:@menu_checks, { connected_after_35_seconds: AnilCoop.connected? })
+            if @coop_local == 2 && elapsed >= 38
+              bitmap = Graphics.snap_to_bitmap
+              bitmap.save_to_png(File.join(AnilCoopDev::PROFILE, "qa-2v2-summary.png"))
+              bitmap.dispose
+              AnilCoop.disconnect
+              AnilCoop.check_battle_transport!
+            end
+          end
+          raise "QA menu disconnect deadline" if elapsed > 55
+        end
+      end
       if @turnCount == 1 && @coop_local == 2 && AnilCoopQA.scenario == "disconnect"
         AnilCoop.disconnect
         raise AnilCoop::BattleStopped, "connection lost (injected by QA)"

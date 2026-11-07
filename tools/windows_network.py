@@ -32,7 +32,7 @@ def main():
     if args.server_host not in ("127.0.0.1", "localhost") and (not secret or len(secret) < 16):
         raise SafetyError("Set ANIL_COOP_SECRET (at least 16 characters) for LAN/VPN")
     game = Path(launch_plan(ROOT, [args.client])["clients"][0]["cwd"])
-    if not all((game / "CoopDev" / filename).is_file() for filename in ("coop.rb", "coop_team.rb", "coop_trainers.rb", "coop_result.rb", "coop_battle.rb", "loader.rb")):
+    if not all((game / "CoopDev" / filename).is_file() for filename in ("coop.rb", "coop_team.rb", "coop_trainers.rb", "coop_result.rb", "coop_battle.rb", "coop_menus.rb", "loader.rb")):
         raise SafetyError("Co-op overlay missing: run packaging/windows/Prepare.ps1 first")
     bridge = Bridge(args.server_host, args.port, secret or LOCAL_SECRET)
     names = ("ANIL_COOP_SESSION", "ANIL_COOP_PORT", "ANIL_COOP_HOST", "ANIL_COOP_MODE", "ANIL_COOP_NAME")

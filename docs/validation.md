@@ -233,3 +233,11 @@ ahora actualiza la sala y entra al combate sin requerir «Actualizar» del invit
 Tres tests específicos de NPC (identidad, equipo enemigo congelado, solo) pasaron;
 tres del lanzador y dos del empaquetado también. No se repitieron 3+3/Repartir Exp.
 Queda pendiente recorrer NPC originales con controles humanos en dos PCs/Windows.
+
+`MENUS01`: dos clientes con gráficos mantuvieron reservas y ficha de datos nativas
+abiertas durante más de 35 segundos; siguieron conectados. Se inyectó una
+desconexión interna: ambos salieron al mapa, las subescenas se cerraron y no se
+aplicaron resultados. Se añadió heartbeat a esos bucles y a la selección 1–3;
+los combates individuales conservan sus métodos originales. Reporte privado
+`anil-wine-6b0b943e8e8948288b720a87df70ee63.json`. No simula teclas: invoca las
+subescenas originales y sus actualizaciones. La navegación humana sigue pendiente.

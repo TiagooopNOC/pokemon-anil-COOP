@@ -440,6 +440,7 @@ class AnilCoopBattle < Battle
   rescue AnilCoop::BattleStopped, StandardError => error
     AnilCoop.instance_variable_set(:@battle_cleanup, true)
     @decision = 0
+    AnilCoop.close_battle_menus if AnilCoop.respond_to?(:close_battle_menus)
     begin
       @scene.pbEndBattle(0)
     rescue StandardError => cleanup_error
