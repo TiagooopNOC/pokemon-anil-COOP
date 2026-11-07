@@ -241,3 +241,9 @@ aplicaron resultados. Se añadió heartbeat a esos bucles y a la selección 1–
 los combates individuales conservan sus métodos originales. Reporte privado
 `anil-wine-6b0b943e8e8948288b720a87df70ee63.json`. No simula teclas: invoca las
 subescenas originales y sus actualizaciones. La navegación humana sigue pendiente.
+
+`ALPHA01`: el asistente `tools/play.py` creó su servidor en loopback, instaló el
+overlay y abrió client03 bajo Wine sin bot ni NPC QA. El loader cargó sin errores.
+Se cerró intencionalmente a los 18 s (timeout 124); no se controló una partida.
+La ruta Windows está preparada con Game.exe nativo y no usa Wine; no se ejecutó
+Windows durante esta validación.
