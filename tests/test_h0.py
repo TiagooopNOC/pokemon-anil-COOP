@@ -202,6 +202,22 @@ class WorkspaceSafety(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             h0.package(self.repo)
 
+    def test_alpha_package_contains_launchers_and_reviewed_vendor_only(self):
+        for name in ("README.md", ".gitignore", ".gitattributes", "Jugar-Coop.cmd", "jugar-coop.sh",
+                     "vendor/gameslot/gameslot.py", "vendor/gameslot/LICENSE", "vendor/gameslot/README.md",
+                     "vendor/private-secret.json", "local/workspace.json", "local/Partida 1.rxdata"):
+            target = self.repo / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("synthetic")
+        h0.package(self.repo, alpha=True)
+        with zipfile.ZipFile(self.repo / "dist/anil-coop-alpha.zip") as z:
+            names = z.namelist()
+            self.assertIn("Jugar-Coop.cmd", names)
+            self.assertIn("vendor/gameslot/LICENSE", names)
+            self.assertNotIn("vendor/private-secret.json", names)
+            self.assertFalse(any(n.startswith("local/") for n in names))
+            self.assertEqual(z.getinfo("jugar-coop.sh").external_attr >> 16, 0o755)
+
 
 if __name__ == "__main__":
     unittest.main()

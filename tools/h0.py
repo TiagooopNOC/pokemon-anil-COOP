@@ -389,7 +389,7 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bo
         slot("release")
 
 
-def package(repo: Path) -> dict:
+def package(repo: Path, *, alpha: bool = False) -> dict:
     names = ["README.md", ".gitignore", ".gitattributes"]
     allowed = {".md", ".py", ".rb", ".json", ".ps1"}
     for dirname in PACKAGE_DIRS:
@@ -397,14 +397,18 @@ def package(repo: Path) -> dict:
             no_links(p)
             if p.is_file() and p.suffix in allowed and "__pycache__" not in p.parts:
                 names.append(p.relative_to(repo).as_posix())
-    out = no_links(repo / "dist/anil-coop-h0-tools.zip")
+    if alpha:
+        names += ["Jugar-Coop.cmd", "jugar-coop.sh", "vendor/gameslot/gameslot.py",
+                  "vendor/gameslot/LICENSE", "vendor/gameslot/README.md"]
+    out = no_links(repo / ("dist/anil-coop-alpha.zip" if alpha else "dist/anil-coop-h0-tools.zip"))
     out.parent.mkdir(exist_ok=True)
     # Deterministic archive, own source only, refuses to overwrite a prior deliverable.
     with zipfile.ZipFile(out, "x", compression=zipfile.ZIP_DEFLATED) as z:
         for name in sorted(names):
+            no_links(repo / name)
             info = zipfile.ZipInfo(name, (2026, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
-            info.external_attr = 0o644 << 16
+            info.external_attr = (0o755 if name == "jugar-coop.sh" else 0o644) << 16
             z.writestr(info, (repo / name).read_bytes())
     return {"status": "PACKAGED_TOOLS_ONLY", "files": len(names), "sha256": digest(out)}
 
@@ -417,7 +421,7 @@ def main(argv=None) -> int:
     prep.add_argument("--clients", type=int, default=4)
     commands.add_parser("verify")
     commands.add_parser("doctor")
-    commands.add_parser("package")
+    commands.add_parser("package").add_argument("--alpha", action="store_true")
     launch = commands.add_parser("launch")
     launch.add_argument("--clients", nargs="+", default=["client01"])
     launch.add_argument("--run", action="store_true")
@@ -431,7 +435,7 @@ def main(argv=None) -> int:
         elif args.command == "doctor":
             result = doctor(ROOT)
         elif args.command == "package":
-            result = package(ROOT)
+            result = package(ROOT, alpha=args.alpha)
         elif args.run:
             if not args.gameslot:
                 raise SafetyError("--run requires --gameslot PATH")

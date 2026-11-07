@@ -15,11 +15,10 @@ el venv ya existente. Esto valida esa suite y las llamadas observadas, no todos 
 adaptadores ni un servidor multijugador. No se ejecutó git pull ni se utilizaron
 cuentas para issues/PR; no se publicó información del propietario.
 
-GameSlot es dependencia externa opcional para arrancar las pruebas nativas Windows;
-se usa desde su checkout, no se redistribuye. No usar el GameSlot sin revisar su
-soporte de procesos para Wine. Las herramientas de bots, fuzzer, chaos y journal se
-evaluarán cuando exista código de sincronización; no tiene sentido declarar sus
-escenarios como pruebas de un mod todavía inexistente.
+GameSlot se incluye sin modificaciones en `vendor/gameslot/`, con su licencia MIT,
+revisión y SHA-256 en el README de ese directorio. Los lanzadores lo usan para
+reservar procesos/perfiles tanto en Wine como en Windows; Windows nativo sigue
+pendiente de ejecución. El juego, sus plugins y VMS no se redistribuyen.
 
 ## Voltseon's Multiplayer Solution (VMS)
 

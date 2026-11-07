@@ -1,14 +1,16 @@
-# Pokémon Añil Co-op — prototipo de presencia
+# Pokémon Añil Co-op — alfa experimental para dos amigos
 
-Prototipo de 1 a 4 jugadores: cada cliente conserva su partida, ve a los
-demás en el mismo mapa y recibe sus posiciones, dirección y pasos. Probado con
-cuatro procesos reales de Pokémon Añil bajo Wine. Los combates salvajes siguen
-siendo individuales mientras la presencia permanece conectada. Aún no sincroniza
-eventos, campaña ni combates contra entrenadores. El servidor puede escuchar
-en loopback o en una IP privada de LAN/VPN; la conexión desde otra computadora
-se debe probar allí.
+Exploración compartida, salvajes individuales y combate 2v2 contra entrenadores
+ordinarios, con 1–3 Pokémon propios por jugador. La historia, los guardados y las
+recompensas de cada participante permanecen individuales. Probado con motores
+reales bajo Wine y órdenes programadas; faltan controles humanos de punta a punta,
+dos computadoras físicas y Windows nativo.
 
-Para conectar dos computadoras, seguí la [guía LAN/VPN](docs/connect.md).
+**Empezar:** `Jugar-Coop.cmd` en Windows x64 o `./jugar-coop.sh` en Linux Mint.
+El asistente prepara una copia y permite crear/unirse por LAN o VPN privada.
+Requisitos, pasos y límites: [guía breve de la alfa](docs/alpha.md).
+Para generar el ZIP sin juego ni guardados: `python3 -B tools/h0.py package --alpha`.
+La exploración admite hasta cuatro clientes; los combates cooperativos solo dos.
 
 ## Probar en Linux Mint
 
@@ -47,7 +49,7 @@ Infraestructura de desarrollo para Windows x64 desde Linux Mint. Se preparan de
 uno a cuatro clientes independientes, un preload de aislamiento de guardados,
 verificaciones de integridad y herramientas portables.
 
-El repositorio contiene únicamente herramientas y documentación propias. El juego,
+El repositorio contiene el mod, herramientas y GameSlot bajo licencia MIT. El juego,
 sus plugins, las copias de prueba, los guardados y los informes privados quedan
 fuera de Git, dentro de `local/`. No se distribuye el juego ni VMS.
 
@@ -71,9 +73,9 @@ python3 -B tools/h0.py package
 `package` crea un ZIP de herramientas propias. El prototipo requiere una copia
 local del juego por computadora y un servidor en una IP privada de LAN/VPN.
 
-En Windows usar `py -3` en lugar de `python3` o los scripts PowerShell de
-`packaging/windows/`. La ejecución nativa requiere el `gameslot.py` revisado de
-Co-op Anything. Ver instrucciones y límites en [Hito 0](docs/hito-0.md).
+En Windows usar `py -3` en lugar de `python3`. GameSlot revisado está incluido en
+`vendor/gameslot/`. Los comandos de arriba son herramientas de desarrollo;
+para jugar usar el asistente y la guía de la alfa.
 
 ## Estado y documentos
 
