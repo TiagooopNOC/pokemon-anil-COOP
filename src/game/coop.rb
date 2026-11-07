@@ -74,8 +74,15 @@ module AnilCoop
     page.trigger = 0
     page.graphic.character_name = sprite_name
     page.graphic.character_hue = 120
-    Compiler.push_script(page.list, 'TrainerBattle.start(:AZUL1, "Azul", 1)')
+    Compiler.push_script(page.list, 'if TrainerBattle.start(:AZUL1, "Azul", 1); $game_self_switches[[$game_map.map_id, 9000, "A"]] = true; $game_map.need_refresh = true; end')
     Compiler.push_end(page.list)
+    defeated = RPG::Event::Page.new
+    defeated.condition.self_switch_valid = true
+    defeated.condition.self_switch_ch = "A"
+    defeated.graphic = Marshal.load(Marshal.dump(page.graphic))
+    Compiler.push_script(defeated.list, 'pbMessage("Ya hemos combatido.")')
+    Compiler.push_end(defeated.list)
+    event.pages << defeated
     game_event = Game_Event.new($game_map.map_id, event, $game_map)
     $game_map.events[event_id] = game_event
     $scene.spriteset.character_sprites.push(Sprite_Character.new(Spriteset_Map.viewport, game_event))
@@ -231,7 +238,8 @@ module AnilCoop
       Input.update
       network
       state = @trainer_states[[event.map_id, event.id]]
-      return state if state && (!phase || state["phase"] == phase)
+      mine = state && state["participants"].any? { |p| p["id"] == @id }
+      return state if state && (!phase || state["phase"] == phase) && (phase != "pending" || mine)
       return nil if !@socket || @trainer_error || Time.now.to_f >= deadline
     end
   end

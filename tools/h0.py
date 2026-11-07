@@ -297,7 +297,7 @@ def launch_plan(repo: Path, clients: list[str]) -> dict:
     return {"status": "PLAN_ONLY", "runtime": doctor(repo)["runtime"], "clients": result}
 
 
-def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bool = False, personal_team: bool = False) -> dict:
+def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bool = False, personal_team: bool = False, coop_battles: bool = False) -> dict:
     # Wine support is intentionally gated until its process/slot adapter is tested.
     # The final target is native Windows, for which gameslot has PID identity checks.
     if not doctor(repo)["native_windows_x64"]:
@@ -349,6 +349,9 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bo
             run_env.pop("ANIL_COOP_QA_BOT", None)
             run_env.pop("ANIL_COOP_QA_SCENARIO", None)
             run_env.pop("ANIL_COOP_PERSONAL_TEAM", None)
+            run_env.pop("ANIL_COOP_BATTLES", None)
+            if coop_battles:
+                run_env.update(ANIL_COOP_BATTLES="1", ANIL_COOP_PERSONAL_TEAM="1")
             if personal_team:
                 run_env["ANIL_COOP_PERSONAL_TEAM"] = "1"
             if qa_2v2:
@@ -370,7 +373,7 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bo
                    for c in plan["clients"]):
             raise SafetyError("Game exited without bootstrap evidence")
         return {"status": "BOOTSTRAP_OBSERVED", "exit_codes": codes,
-                "save_reload_test": "NOT_RUN", "cooperative_play": "PRESENCE_ONLY"}
+                "save_reload_test": "NOT_RUN", "cooperative_play": "PERSONAL_2V2_ALPHA" if coop_battles else "PRESENCE_ONLY"}
     finally:
         # Only children created by this launcher. Never terminate games by image name.
         for process in processes:

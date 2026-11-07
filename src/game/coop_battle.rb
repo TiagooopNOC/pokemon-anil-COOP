@@ -5,7 +5,7 @@ module AnilCoop
   class BattleStopped < StandardError; end
 
   def self.qa_2v2?
-    ENV["ANIL_COOP_QA_2V2"] == "1" && ENV["ANIL_COOP_QA_TRAINER"] == "1"
+    ENV["ANIL_COOP_BATTLES"] == "1" || (ENV["ANIL_COOP_QA_2V2"] == "1" && ENV["ANIL_COOP_QA_TRAINER"] == "1")
   end
 
   def self.coop_battle_active?; !!@active_battle; end
@@ -89,6 +89,7 @@ module AnilCoop
 
   def self.qa_coop_battle(state, scene: nil, visual: true)
     @last_qa_result = nil
+    @last_battle_state = state
     outcome_variable = $game_temp.battle_rules["outcomeVar"] || 1
     run_coop_battle(state, scene: scene, visual: visual)
     if state["enemy_team"] && @last_qa_result && @last_qa_result[:completed]

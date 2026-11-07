@@ -41,9 +41,29 @@ module AnilCoopQA
     $game_player.refresh
     $scene.createSpritesets
     Graphics.transition(0) # Mirror Scene_Map.main's initialization in this driver.
-    wait_until { AnilCoop.connected? && AnilCoop.instance_variable_get(:@peers).length == 1 }
+    wait_until do
+      peers = AnilCoop.instance_variable_get(:@peers)
+      AnilCoop.connected? && peers.length == 1 && peers.values.all? { |p| p["position"].is_a?(Hash) }
+    end
     AnilCoop.qa_trainer
     event = $game_map.events.fetch(9000)
+    before_money = $player.money
+    before_exp = $player.party.map(&:exp)
+    visual = ENV["ANIL_COOP_QA_BOT"] == "visual"
+    if scenario == "personal-event"
+      my_id = AnilCoop.instance_variable_get(:@id)
+      remote_id = AnilCoop.instance_variable_get(:@peers).keys.first
+      remote_before = AnilCoop.instance_variable_get(:@peers)[remote_id]["position"].dup
+      interpreter = pbMapInterpreter
+      interpreter.setup(event.list, event.id)
+      while interpreter.running?
+        Graphics.update
+        AnilCoop.tick($scene)
+        interpreter.update
+      end
+      state = AnilCoop.instance_variable_get(:@last_battle_state)
+      raise "NPC event did not start a battle" unless state
+    else
     lobby_extra = { forced: false, prototype: AnilCoop.battle_prototype }
     if scenario == "personal-npc"
       lobby_extra[:encounter_key] = AnilCoop.trainer_identity(event, [:AZUL1, "Azul", 1])
@@ -74,12 +94,12 @@ module AnilCoopQA
     state = AnilCoop.instance_variable_get(:@trainer_states)[key]
     visual = ENV["ANIL_COOP_QA_BOT"] == "visual"
     scene = visual ? AnilCoopQA::VisualScene.new : AnilCoopQA::EngineScene.new
-    before_money = $player.money
-    before_exp = $player.party.map(&:exp)
     AnilCoop.qa_coop_battle(state, scene: scene, visual: visual)
+    end
     personal_exp = $player.party.each_with_index.map { |p, i| p.exp - before_exp[i] }
     result = AnilCoop.instance_variable_get(:@last_qa_result) || { error: "no result" }
     10.times { Graphics.update; AnilCoop.tick($scene) }
+    result[:event_victory] = $game_self_switches[[$game_map.map_id, 9000, "A"]] if scenario == "personal-event"
     result[:personal_money_delta] = $player.money - before_money
     result[:personal_exp_delta] = personal_exp if AnilCoop.personal_team?
     result[:connected_after] = AnilCoop.connected?
@@ -162,8 +182,9 @@ module AnilCoopQA
                       result[:save_unchanged] && result[:scene_map]
     elsif scenario == "status"
       result[:pass] &&= result.dig(:observed, :poison) && result.dig(:observed, :item_consumed)
-    elsif scenario == "personal-npc"
+    elsif ["personal-npc", "personal-event"].include?(scenario)
       result[:pass] &&= result[:trainer_completed] && result[:personal_money_delta] > 0
+      result[:pass] &&= result[:event_victory] if scenario == "personal-event"
     elsif scenario == "personal-share"
       delta = result[:personal_exp_delta]
       result[:pass] &&= [1, 3, 5].all? { |i| delta[i] == 0 } && delta[2] > 0 && delta[4] > 0 &&
@@ -342,6 +363,41 @@ module AnilCoopQA
     end
   end
 
+  module EventDriver
+    def trainer_choice(key, text, commands, &block)
+      return super unless AnilCoopQA.scenario == "personal-event"
+      super do
+        state = instance_variable_get(:@trainer_states)[key]
+        me = state["participants"].find { |p| p["id"] == instance_variable_get(:@id) }
+        if !@qa_lobby_captured && state["participants"].length == 2 && state["participants"].all? { |p| p["team_count"] > 0 }
+          bitmap = Graphics.snap_to_bitmap
+          bitmap.save_to_png(File.join(AnilCoopDev::PROFILE, "qa-2v2-lobby.png"))
+          bitmap.dispose
+          @qa_lobby_captured = true
+        end
+        if !me["ready"]
+          0
+        elsif state["host"] == me["id"] && state["participants"].length == 2 && state["participants"].all? { |p| p["ready"] }
+          2
+        end
+      end
+    end
+
+    def choose_team(event)
+      return super unless AnilCoopQA.scenario == "personal-event"
+      trainer_send("trainer_team", event, team: select_team([0]), trainer: trainer_snapshot)
+      true
+    end
+
+    def qa_coop_battle(state, scene: nil, visual: true)
+      if AnilCoopQA.scenario == "personal-event"
+        visual = ENV["ANIL_COOP_QA_BOT"] == "visual"
+        scene = visual ? AnilCoopQA::VisualScene.new : AnilCoopQA::EngineScene.new
+      end
+      super(state, scene: scene, visual: visual)
+    end
+  end
+
   module Fixtures
     def test_pokemon(species, owner, pid, moves, ability)
       pkmn = super
@@ -369,6 +425,7 @@ end
 
 AnilCoopBattle.prepend(AnilCoopQA::Orders)
 AnilCoop.singleton_class.prepend(AnilCoopQA::Fixtures)
+AnilCoop.singleton_class.prepend(AnilCoopQA::EventDriver)
 $anil_coop_qa_trace = TracePoint.new(:return) do |event|
   next unless event.method_id == :set_up_system && event.defined_class == Game.singleton_class
   $anil_coop_qa_trace.disable

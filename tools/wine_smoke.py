@@ -31,13 +31,17 @@ def main() -> int:
     parser.add_argument("--qa-trainer", action="store_true")
     parser.add_argument("--qa-2v2", action="store_true", help="Experimental NPC fixture, temporary teams, no rewards/saves")
     parser.add_argument("--qa-battle-bot", choices=("engine", "visual"))
+    parser.add_argument("--play", action="store_true", help="Run until the player closes the game")
+    parser.add_argument("--coop-battles", action="store_true")
     parser.add_argument("--personal-team", action="store_true")
-    parser.add_argument("--qa-scenario", choices=("basic", "status", "switch", "loss", "disconnect", "desync", "rewards", "personal", "personal-reserves", "personal-share", "personal-npc"), default="basic")
+    parser.add_argument("--qa-scenario", choices=("basic", "status", "switch", "loss", "disconnect", "desync", "rewards", "personal", "personal-reserves", "personal-share", "personal-npc", "personal-event"), default="basic")
     parser.add_argument("--qa-starter", action="append", default=[], metavar="CLIENT:SPECIES")
     parser.add_argument("--qa-randomlocke", action="append", default=[], metavar="CLIENT")
     args = parser.parse_args()
     if os.name == "nt" or not shutil.which("wine") or not shutil.which("wineserver"):
         raise SafetyError("This smoke runner requires Linux and Wine")
+    if args.play and args.qa_battle_bot:
+        raise SafetyError("Unbounded play cannot use a QA bot")
     if not 10 <= args.seconds <= 600:
         raise SafetyError("Run length must be 10..600 seconds")
     selected = args.clients or ([args.client] if args.client else [])
@@ -117,6 +121,9 @@ def main() -> int:
             run_env.pop("ANIL_COOP_QA_BOT", None)
             run_env.pop("ANIL_COOP_QA_SCENARIO", None)
             run_env.pop("ANIL_COOP_PERSONAL_TEAM", None)
+            run_env.pop("ANIL_COOP_BATTLES", None)
+            if args.coop_battles:
+                run_env.update(ANIL_COOP_BATTLES="1", ANIL_COOP_PERSONAL_TEAM="1")
             if args.personal_team or args.qa_scenario.startswith("personal"):
                 run_env["ANIL_COOP_PERSONAL_TEAM"] = "1"
             if args.qa_battle_bot:
@@ -145,7 +152,11 @@ def main() -> int:
             processes.append((client, process, output))
             slot("register-pid", "--pid", str(process.pid))
         deadline = time.monotonic() + args.seconds
-        while any(process.poll() is None for _, process, _ in processes) and time.monotonic() < deadline:
+        renewed = time.monotonic()
+        while any(process.poll() is None for _, process, _ in processes) and (args.play or time.monotonic() < deadline):
+            if args.play and time.monotonic() - renewed >= 60:
+                slot("acquire", "--exclusive", "--ttl", str(args.seconds + 120), "--wait", "0")
+                renewed = time.monotonic()
             time.sleep(0.5)
         observations = [{"client": client["client"], "wine_pid": process.pid,
                          "exit_code_before_cleanup": process.poll(),
