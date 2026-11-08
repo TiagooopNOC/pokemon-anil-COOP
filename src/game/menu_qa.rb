@@ -9,6 +9,15 @@ $anil_coop_menu_trace = TracePoint.new(:return) do |event|
     scene = PokemonLoad_Scene.new
     scene.pbStartScene(commands, false, nil, nil, 0)
     raise "Título sin Multijugador" unless commands == ["Partida Nueva", "Multijugador", "Cerrar Juego"]
+    # Check the two-argument Multi Save API and remapping of the original Quit.
+    chooser = Class.new do
+      def pbChoose(_commands, continue_idx)
+        raise "Índice Continuar no reenviado" unless continue_idx == 0
+        2
+      end
+    end
+    chooser.prepend(AnilCoopTitleMenu)
+    raise "Cerrar Juego cambió de índice" unless chooser.new.pbChoose(commands, 0) == 1
     scene.pbStartScene2
     Graphics.update
     bitmap = Graphics.snap_to_bitmap

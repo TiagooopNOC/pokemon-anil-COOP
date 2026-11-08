@@ -117,9 +117,11 @@ module AnilCoopTitleMenu
     super
   end
 
-  def pbChoose(commands)
+  # Multi Save passes its Continue index as a second argument. Forward it so
+  # Left/Right save-slot selection keeps working on the original title screen.
+  def pbChoose(commands, *args)
     loop do
-      index = super
+      index = super(commands, *args)
       multiplayer = commands.index("Multijugador")
       if index == multiplayer
         AnilCoop.multiplayer_menu
