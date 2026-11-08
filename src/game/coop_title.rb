@@ -57,6 +57,29 @@ module AnilCoop
     raise(reason.empty? ? "No se pudo conectar. Revisá la IP, sala y firewall." : reason)
   end
 
+  def self.invitation(host, code)
+    "#{host} #{code}"
+  end
+
+  def self.parse_invitation(value)
+    parts = value.to_s.strip.split(/\s+/)
+    raise "Copiá la invitación completa (IP y código)." unless
+      parts.length == 2 && parts[0].match?(/\A\d{1,3}(?:\.\d{1,3}){3}\z/) &&
+      parts[1].match?(/\A[A-Za-z0-9]{12}\z/)
+    [parts[0], parts[1].upcase]
+  end
+
+  def self.copy_room_data(session)
+    labels = ["Copiar invitación", "Copiar IP", "Copiar código", "Volver"]
+    choice = pbMessage("Datos de la sala", labels, 3)
+    return if choice == 3 || choice == -1
+    value = [invitation(session["host"], session["code"]), session["host"], session["code"]][choice]
+    Input.clipboard = value
+    pbMessage("Copiado al portapapeles.")
+  rescue StandardError
+    pbMessage("No se pudo usar el portapapeles en este equipo.")
+  end
+
   def self.multiplayer_menu
     loop do
       status = menu_request("status")
@@ -67,22 +90,23 @@ module AnilCoop
         text = "Sala #{session['code']} | #{session['host']}\n" \
                "Estado: #{connected? ? 'conectado' : 'sin conexión'} | " \
                "Jugadores: #{1 + @peers.length}#{peers.empty? ? '' : " (#{peers})"}"
-        choice = pbMessage(text, ["Cargar partida", "Reintentar", "Desconectar", "Volver"], 3) { battle_tick }
+        choice = pbMessage(text, ["Cargar partida", "Copiar datos", "Reintentar", "Desconectar", "Volver"], 4) { battle_tick }
         case choice
-        when 0, 3, -1 then return
-        when 1
+        when 0, 4, -1 then return
+        when 1 then copy_room_data(session)
+        when 2
           begin
             menu_stop
             menu_start(session["mode"], session["host"], session["code"])
           rescue StandardError => e
             pbMessage(e.message)
           end
-        when 2 then menu_stop
+        when 3 then menu_stop
         end
       else
         choice = pbMessage("Conectate antes de cargar tu partida.",
-                           ["Crear partida", "Unirse a un amigo", "Volver"], 2)
-        return if choice == 2 || choice == -1
+                           ["Crear partida", "Unirse a un amigo", "Pegar invitación", "Volver"], 3)
+        return if choice == 3 || choice == -1
         begin
           if choice == 0
             addresses = status["addresses"] || []
@@ -96,6 +120,10 @@ module AnilCoop
             next if host.to_s.empty?
             code = pbEnterText("Código de sala", 12, 12).upcase
             next if code.empty?
+            menu_start("join", host, code)
+            pbMessage("Conectado. Ya podés cargar tu partida.") { battle_tick }
+          elsif choice == 2
+            host, code = parse_invitation(Input.clipboard)
             menu_start("join", host, code)
             pbMessage("Conectado. Ya podés cargar tu partida.") { battle_tick }
           end

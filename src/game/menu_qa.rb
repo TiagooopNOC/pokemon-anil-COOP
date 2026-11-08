@@ -4,6 +4,7 @@ $anil_coop_menu_trace = TracePoint.new(:return) do |event|
   $anil_coop_menu_trace.disable
   result = { pass: false }
   scene = nil
+  clipboard_before = nil
   begin
     commands = ["Partida Nueva", "Cerrar Juego"]
     scene = PokemonLoad_Scene.new
@@ -26,10 +27,17 @@ $anil_coop_menu_trace = TracePoint.new(:return) do |event|
     data = AnilCoop.menu_start("create", "127.0.0.1")
     raise "No conectó desde el juego" unless AnilCoop.connected?
     raise "Sala no visible" unless AnilCoop.menu_request("status")["session"]["code"] == data["code"]
-    result = { pass: true, title_entry: true, connected: true, code_length: data["code"].length }
+    clipboard_before = Input.clipboard
+    invite = AnilCoop.invitation(data["host"], data["code"])
+    Input.clipboard = invite
+    raise "Portapapeles no conserva la invitación" unless Input.clipboard == invite
+    raise "Invitación pegada inválida" unless AnilCoop.parse_invitation(Input.clipboard) == [data["host"], data["code"]]
+    result = { pass: true, title_entry: true, connected: true,
+               clipboard: true, code_length: data["code"].length }
   rescue StandardError => e
     result = { pass: false, error: "#{e.class}: #{e.message}", trace: e.backtrace.first(5) }
   ensure
+    Input.clipboard = clipboard_before.to_s unless clipboard_before.nil?
     scene&.pbEndScene
     AnilCoop.menu_stop rescue nil
     File.write(File.join(AnilCoopDev::PROFILE, "qa-multiplayer-result.json"), JSON.generate(result))
