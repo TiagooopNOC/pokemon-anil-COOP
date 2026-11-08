@@ -31,6 +31,7 @@ def main() -> int:
     parser.add_argument("--qa-trainer", action="store_true")
     parser.add_argument("--qa-2v2", action="store_true", help="Experimental NPC fixture, temporary teams, no rewards/saves")
     parser.add_argument("--qa-battle-bot", choices=("engine", "visual"))
+    parser.add_argument("--qa-presence", action="store_true", help="Run native remote-motion checks without OS input")
     parser.add_argument("--play", action="store_true", help="Run until the player closes the game")
     parser.add_argument("--coop-battles", action="store_true")
     parser.add_argument("--personal-team", action="store_true")
@@ -91,6 +92,9 @@ def main() -> int:
         qa_result = profile / "qa-2v2-result.json"
         if args.qa_battle_bot and qa_result.exists():
             qa_result.rename(profile / "logs" / ("qa-2v2-previous-" + uuid.uuid4().hex + ".json"))
+        presence_result = profile / "qa-presence-result.json"
+        if args.qa_presence and presence_result.exists():
+            presence_result.rename(profile / "logs" / ("qa-presence-previous-" + uuid.uuid4().hex + ".json"))
     slot_tool = args.gameslot.resolve()
     if not slot_tool.is_file():
         raise SafetyError("Reviewed GameSlot path is missing")
@@ -120,6 +124,7 @@ def main() -> int:
             run_env.pop("ANIL_COOP_QA_2V2", None)
             run_env.pop("ANIL_COOP_QA_BOT", None)
             run_env.pop("ANIL_COOP_QA_SCENARIO", None)
+            run_env.pop("ANIL_COOP_PRESENCE_QA", None)
             run_env.pop("ANIL_COOP_PERSONAL_TEAM", None)
             run_env.pop("ANIL_COOP_BATTLES", None)
             if args.coop_battles:
@@ -128,6 +133,8 @@ def main() -> int:
                 run_env["ANIL_COOP_PERSONAL_TEAM"] = "1"
             if args.qa_battle_bot:
                 run_env.update(ANIL_COOP_QA_BOT=args.qa_battle_bot, ANIL_COOP_QA_SCENARIO=args.qa_scenario)
+            if args.qa_presence:
+                run_env["ANIL_COOP_PRESENCE_QA"] = "1"
             if args.qa_2v2:
                 run_env["ANIL_COOP_QA_2V2"] = "1"
             if client["client"] in args.qa_wild_client:
@@ -168,10 +175,15 @@ def main() -> int:
             for observation, client in zip(observations, plan):
                 report = Path(client["save_directory"]).parent / "qa-2v2-result.json"
                 observation["battle_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
+        if args.qa_presence:
+            for observation, client in zip(observations, plan):
+                report = Path(client["save_directory"]).parent / "qa-presence-result.json"
+                observation["presence_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
         write_new(result_path, result)
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return 0 if all(item["bootstrap_observed"] and
-                        (not args.qa_battle_bot or item["battle_qa"]["pass"])
+                        (not args.qa_battle_bot or item["battle_qa"]["pass"]) and
+                        (not args.qa_presence or item["presence_qa"]["pass"])
                         for item in observations) else 2
     finally:
         for client, process, _ in processes:

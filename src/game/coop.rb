@@ -4,6 +4,45 @@ require "json"
 
 class AnilCoopRemoteCharacter < Game_Character
   def name; ""; end
+
+  # Only the sprite's real coordinates move. Never run Game_Character#update:
+  # it would fire map step hooks for a player who is not in this save.
+  def follow_network(pos, now = System.uptime)
+    x, y = pos["x"], pos["y"]
+    self.direction = pos["direction"]
+    self.move_speed = pos["speed"] if pos["speed"] && pos["speed"] != move_speed
+    if !@remote_initialized || (x - @x).abs + (y - @y).abs > 2 ||
+       (x != @x && y != @y)
+      @x, @y = x, y
+      @real_x, @real_y = x * Game_Map::REAL_RES_X, y * Game_Map::REAL_RES_Y
+      @remote_start = nil
+      @remote_initialized = true
+    elsif x != @x || y != @y
+      distance = (x - @x).abs + (y - @y).abs
+      @remote_from_x, @remote_from_y = @real_x, @real_y
+      @x, @y = x, y
+      tile_time = move_speed >= 6 ? 0.05 : (move_speed >= 5 ? 0.1 : 2.0 / (2**move_speed))
+      # Two tiles can arrive in one packet at cycling speed. Catch up before
+      # the next sample instead of building an ever-growing visual delay.
+      @remote_duration = distance == 1 ? tile_time : [tile_time * distance, 0.12].min
+      @remote_start = now
+      @remote_pattern = pos["pattern"]
+    end
+    if @remote_start
+      fraction = [[(now - @remote_start) / @remote_duration, 0.0].max, 1.0].min
+      @real_x = @remote_from_x + ((@x * Game_Map::REAL_RES_X) - @remote_from_x) * fraction
+      @real_y = @remote_from_y + ((@y * Game_Map::REAL_RES_Y) - @remote_from_y) * fraction
+      if fraction < 1.0
+        frame_time = pattern_update_speed / 4.0
+        self.pattern = (@remote_pattern + ((now - @remote_start) / frame_time).floor) % 4
+      else
+        @remote_start = nil
+        self.pattern = pos["pattern"]
+      end
+    else
+      self.pattern = pos["pattern"]
+    end
+  end
 end
 
 module AnilCoop
@@ -376,7 +415,8 @@ module AnilCoop
         @sequence += 1
         queue(type: "position", map: $game_map.map_id, x: $game_player.x,
               y: $game_player.y, direction: $game_player.direction,
-              pattern: $game_player.pattern, sprite: sprite_name, seq: @sequence)
+              pattern: $game_player.pattern, speed: $game_player.move_speed,
+              sprite: sprite_name, seq: @sequence)
       end
     end
     if @map != $game_map.map_id
@@ -396,16 +436,14 @@ module AnilCoop
         character = AnilCoopRemoteCharacter.new($game_map)
         character.through = true
         character.character_name = pos["sprite"]
-        character.moveto(pos["x"], pos["y"])
+        character.follow_network(pos)
         sprite = Sprite_Character.new(Spriteset_Map.viewport, character)
         @sprites[id] = sprite
         log("peer visible slot=#{peer["slot"]} map=#{@map}")
       end
       character = sprite.character
       character.character_name = pos["sprite"]
-      character.moveto(pos["x"], pos["y"]) if character.x != pos["x"] || character.y != pos["y"]
-      character.direction = pos["direction"]
-      character.pattern = pos["pattern"]
+      character.follow_network(pos)
       sprite.update
     end
   rescue StandardError => e

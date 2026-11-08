@@ -69,13 +69,22 @@ class SessionServerTests(unittest.TestCase):
         # Consume enter notification on the first connection.
         self.assertEqual(self.receive(a)["type"], "enter")
         valid = {"type": "position", "map": 1, "x": 4, "y": 5,
-                 "direction": 2, "pattern": 1, "seq": 0, "sprite": "trainer"}
+                 "direction": 2, "pattern": 1, "speed": 3.5, "seq": 0, "sprite": "trainer"}
         a.sendall((json.dumps(valid) + "\n").encode())
         packet = self.receive(b)
         self.assertEqual(packet["player"]["id"], first["id"])
         self.assertEqual(packet["player"]["position"]["x"], 4)
-        invalid = dict(valid, seq=1, x=True)
+        self.assertEqual(packet["player"]["position"]["speed"], 3.5)
+        self.assertEqual(self.exchange(a, dict(valid, seq=1, speed=None))["reason"], "invalid_position")
+        legacy = dict(valid, seq=1, x=5)
+        del legacy["speed"]
+        a.sendall((json.dumps(legacy) + "\n").encode())
+        self.assertEqual(self.receive(b)["player"]["position"]["speed"], 4)
+        invalid = dict(valid, seq=2, x=True)
         self.assertEqual(self.exchange(a, invalid)["reason"], "invalid_position")
+        for bad_speed in (True, 0, 7, float("inf"), "4"):
+            self.assertEqual(self.exchange(a, dict(valid, seq=2, speed=bad_speed))["reason"],
+                             "invalid_position")
         self.assertEqual(self.exchange(a, {"type": "position", "map": 1})["reason"], "invalid_position")
 
     def test_auth_and_private_binding(self):

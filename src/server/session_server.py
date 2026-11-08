@@ -1,5 +1,6 @@
 """Private-network JSON-lines presence server. Python standard library only."""
 import argparse
+import math
 import copy
 import hashlib
 import hmac
@@ -127,9 +128,13 @@ class State:
                 sprite = message.get("sprite", "")
                 if not isinstance(sprite, str) or not VALID_SPRITE.fullmatch(sprite):
                     return {"type": "error", "reason": "invalid_sprite"}, identity
+                speed = message.get("speed", 4)
+                if type(speed) not in (int, float) or not math.isfinite(speed) or not 1 <= speed <= 6:
+                    return {"type": "error", "reason": "invalid_position"}, identity
                 player["seq"] = message["seq"]
                 player["position"] = {k: message[k] for k in keys if k != "seq"}
                 player["position"]["sprite"] = sprite
+                player["position"]["speed"] = speed
                 self.broadcast(room, {"type": "position", "player": self.public(player)}, except_sock=sock)
                 return None, identity
             if kind == "ping":

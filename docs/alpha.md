@@ -30,6 +30,18 @@ listos. El invitado entra automáticamente. Cada ventana usa los controles norma
 para su Pokémon, objetivos y reservas propias. «Combatir solo» mantiene el flujo
 individual original. Los demás jugadores pueden seguir explorando.
 
+## Comprobación manual de movimiento y objetivos
+
+Con dos PC en la misma sala, caminá, corré, detenete, girá y cambiá de mapa
+alternadamente. El otro jugador debe verse desplazarse entre casillas sin saltos;
+al cambiar de mapa, su sprite debe desaparecer y reaparecer en el mapa correcto.
+Contra un NPC ordinario, probá un movimiento que se aplique automáticamente al
+usuario o a un lado (por ejemplo, Salpicadura), luego ataques con objetivo
+elegido y un turno tras debilitar o sustituir un Pokémon. Ambos deben terminar
+el combate y volver al mapa conectados. Si aparece «illegal target», guardá
+`coop.log` de ambos perfiles aislados y anotá movimiento, turno y objetivo;
+el log incluye los índices y la regla de objetivo, sin la clave de conexión.
+
 ## Alcance que falta comprobar
 
 Se probaron motores reales bajo Wine con decisiones programadas. Falta una partida
