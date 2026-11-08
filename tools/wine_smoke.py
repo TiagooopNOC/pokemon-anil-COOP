@@ -34,7 +34,7 @@ def main() -> int:
     parser.add_argument("--play", action="store_true", help="Run until the player closes the game")
     parser.add_argument("--coop-battles", action="store_true")
     parser.add_argument("--personal-team", action="store_true")
-    parser.add_argument("--qa-scenario", choices=("basic", "status", "switch", "loss", "disconnect", "menu-disconnect", "desync", "rewards", "personal", "personal-reserves", "personal-share", "personal-npc", "personal-event"), default="basic")
+    parser.add_argument("--qa-scenario", choices=("basic", "automatic-target", "status", "switch", "loss", "disconnect", "menu-disconnect", "desync", "rewards", "personal", "personal-reserves", "personal-share", "personal-npc", "personal-event"), default="basic")
     parser.add_argument("--qa-starter", action="append", default=[], metavar="CLIENT:SPECIES")
     parser.add_argument("--qa-randomlocke", action="append", default=[], metavar="CLIENT")
     args = parser.parse_args()

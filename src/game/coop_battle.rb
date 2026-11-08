@@ -358,7 +358,10 @@ class AnilCoopBattle < Battle
     return ["none", 0, -1] if @battlers[index].fainted?
     choice = @choices[index]
     case choice[0]
-    when :UseMove then ["move", choice[1], choice[3]]
+    when :UseMove
+      target_data = choice[2].pbTarget(@battlers[index])
+      automatic = target_data.num_targets == 0 || target_data.id == :RandomNearFoe
+      ["move", choice[1], automatic ? -1 : choice[3]]
     when :SwitchOut then ["switch", choice[1], -1]
     when :None then ["none", 0, -1]
     else raise AnilCoop::BattleStopped, "unsupported action #{choice[0]}"
@@ -377,7 +380,15 @@ class AnilCoopBattle < Battle
         raise AnilCoop::BattleStopped, "illegal struggle" if pbCanShowFightMenu?(index)
         move = @struggle
       end
-      if target >= 0 && !pbMoveCanTarget?(index, target, move.pbTarget(@battlers[index]))
+      target_data = move.pbTarget(@battlers[index])
+      automatic = target_data.num_targets == 0 || target_data.id == :RandomNearFoe
+      valid_target = automatic ? target == -1 :
+        (target == -1 || (target < @battlers.length && @battlers[target] &&
+                          pbMoveCanTarget?(index, target, target_data)))
+      unless valid_target
+        AnilCoop.log("2v2 rejected target user=#{index} move=#{move.id} slot=#{slot} " \
+                     "selected=#{target} rule=#{target_data.id} count=#{target_data.num_targets} " \
+                     "side_sizes=#{@sideSizes.inspect} battler_hp=#{@battlers.map { |b| b&.hp }.inspect}")
         raise AnilCoop::BattleStopped, "illegal target"
       end
       @choices[index] = [:UseMove, slot, move, target]

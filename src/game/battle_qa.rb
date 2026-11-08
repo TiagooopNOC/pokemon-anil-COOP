@@ -192,6 +192,8 @@ module AnilCoopQA
                       result[:save_unchanged] && result[:scene_map]
     elsif scenario == "status"
       result[:pass] &&= result.dig(:observed, :poison) && result.dig(:observed, :item_consumed)
+    elsif scenario == "automatic-target"
+      result[:pass] &&= result.dig(:observed, :automatic_target_wire)
     elsif ["personal-npc", "personal-event"].include?(scenario)
       result[:pass] &&= result[:trainer_completed] && result[:personal_money_delta] > 0
       result[:pass] &&= result[:event_victory] if scenario == "personal-event"
@@ -313,6 +315,21 @@ module AnilCoopQA
       qa_observe
     end
 
+    def coop_order(index)
+      order = super
+      if AnilCoopQA.scenario == "automatic-target" && @turnCount == 0 && index == 0
+        qa_evidence[:automatic_target_wire] = order == ["move", 1, -1]
+      end
+      order
+    end
+
+    def coop_apply(index, order)
+      if AnilCoopQA.scenario == "automatic-target" && @turnCount == 0 && index == 0
+        qa_evidence[:automatic_target_wire] = order == ["move", 1, -1]
+      end
+      super
+    end
+
     def pbEndOfRoundPhase
       if @turnCount == 0 && @coop_local == 2 && AnilCoopQA.scenario == "desync"
         @battlers[0].hp -= 1 # Negative test: validation must reject this corruption.
@@ -368,7 +385,7 @@ module AnilCoopQA
     end
 
     def pbFightMenu(index)
-      slot = (@turnCount == 0 && AnilCoopQA.scenario == "basic") ? 1 : 0
+      slot = (@turnCount == 0 && ["basic", "automatic-target"].include?(AnilCoopQA.scenario) && index == 0) ? 1 : 0
       slot = 2 if AnilCoopQA.scenario == "status" && index == 0 && @turnCount < 2
       slot = (0...@battlers[index].moves.length).find { |i| pbCanChooseMove?(index, i, false) } unless pbCanChooseMove?(index, slot, false)
       return pbAutoChooseMove(index) unless slot
@@ -378,6 +395,9 @@ module AnilCoopQA
         b.opposes?(index) && pbMoveCanTarget?(index, b.index, move.pbTarget(@battlers[index]))
       end
       target = targets.empty? ? -1 : targets[@turnCount % targets.length].index
+      # Essentials' human target window returns the user's index for self/side
+      # moves, even though pbMoveCanTarget? intentionally rejects that cursor.
+      target = index if AnilCoopQA.scenario == "automatic-target" && @turnCount == 0 && index == 0
       pbRegisterTarget(index, target)
       AnilCoop.log("QA order turn=#{@turnCount} owner=#{index} move=#{move.id} target=#{target}")
       true
@@ -436,7 +456,9 @@ module AnilCoopQA
   module Fixtures
     def test_pokemon(species, owner, pid, moves, ability)
       pkmn = super
-      if AnilCoopQA.scenario == "personal-share" && pid == 3001
+      if AnilCoopQA.scenario == "automatic-target" && pid == 1001
+        pkmn.moves = [:TACKLE, :SPLASH].map { |id| Pokemon::Move.new(id) }
+      elsif AnilCoopQA.scenario == "personal-share" && pid == 3001
         pkmn.moves = [Pokemon::Move.new(:SPLASH)]
       elsif AnilCoopQA.scenario == "loss" && pid == 3001
         pkmn.level = 40
