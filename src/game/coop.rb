@@ -406,7 +406,7 @@ module AnilCoop
     status&.dispose
   end
 
-  def self.trainer_lobby(event, forced, trainer_args = nil)
+  def self.trainer_lobby(event, forced, trainer_args = nil, story: false)
     key = [event.map_id, event.id]
     @trainer_states.delete(key)
     @trainer_error = nil
@@ -415,7 +415,7 @@ module AnilCoop
     extras[:prototype] = battle_prototype if respond_to?(:qa_2v2?) && qa_2v2? && (personal_team? || event.id == 9000)
     if personal_team? && trainer_args
       extras[:encounter_key] = trainer_identity(event, trainer_args)
-      if trainer_completed?(extras[:encounter_key])
+      if !story && trainer_completed?(extras[:encounter_key])
         pbMessage("Ya derrotaste a este entrenador en tu partida.") { network }
         return false
       end
@@ -466,7 +466,7 @@ module AnilCoop
           log("trainer solo start map=#{event.map_id} event=#{event.id}")
           begin
             won = yield
-            if won && extras[:encounter_key]
+            if won && extras[:encounter_key] && !story
               $PokemonGlobal.anil_coop_trainers ||= {}
               $PokemonGlobal.anil_coop_trainers[extras[:encounter_key]] = true
             end
@@ -575,7 +575,12 @@ class << TrainerBattle
     return anil_coop_base_start(*args) unless ENV["ANIL_COOP_SESSION"] && AnilCoop.connected?
     return anil_coop_base_start(*args) unless pbMapInterpreterRunning?
     event = pbMapInterpreter.get_self
-    return anil_coop_base_start(*args) unless event && event.name[/trainer\(\d+\)/i]
-    AnilCoop.trainer_lobby(event, event.trigger == 2, args) { anil_coop_base_start(*args) }
+    return anil_coop_base_start(*args) unless event
+    story = AnilCoop.first_gary_event?(event, args)
+    return anil_coop_base_start(*args) unless story || event.name[/trainer\(\d+\)/i]
+    AnilCoop.instance_variable_set(:@story_battle, story)
+    AnilCoop.trainer_lobby(event, story || event.trigger == 2, args, story: story) { anil_coop_base_start(*args) }
+  ensure
+    AnilCoop.instance_variable_set(:@story_battle, false)
   end
 end

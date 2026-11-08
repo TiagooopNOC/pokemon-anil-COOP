@@ -33,10 +33,11 @@ def main() -> int:
     parser.add_argument("--qa-battle-bot", choices=("engine", "visual"))
     parser.add_argument("--qa-presence", action="store_true", help="Run native remote-motion checks without OS input")
     parser.add_argument("--qa-presence-network", action="store_true", help="Run ordered motion between two native engines")
+    parser.add_argument("--qa-story-inspect", action="store_true", help="Inspect original rival events read-only")
     parser.add_argument("--play", action="store_true", help="Run until the player closes the game")
     parser.add_argument("--coop-battles", action="store_true")
     parser.add_argument("--personal-team", action="store_true")
-    parser.add_argument("--qa-scenario", choices=("basic", "automatic-target", "status", "switch", "loss", "disconnect", "menu-disconnect", "desync", "rewards", "personal", "personal-reserves", "personal-share", "personal-npc", "personal-event"), default="basic")
+    parser.add_argument("--qa-scenario", choices=("basic", "automatic-target", "status", "switch", "loss", "disconnect", "menu-disconnect", "desync", "rewards", "personal", "personal-reserves", "personal-share", "personal-npc", "personal-event", "story-gary"), default="basic")
     parser.add_argument("--qa-starter", action="append", default=[], metavar="CLIENT:SPECIES")
     parser.add_argument("--qa-randomlocke", action="append", default=[], metavar="CLIENT")
     args = parser.parse_args()
@@ -128,11 +129,12 @@ def main() -> int:
             run_env.pop("ANIL_COOP_QA_BOT", None)
             run_env.pop("ANIL_COOP_QA_SCENARIO", None)
             run_env.pop("ANIL_COOP_PRESENCE_QA", None)
+            run_env.pop("ANIL_COOP_STORY_QA", None)
             run_env.pop("ANIL_COOP_PERSONAL_TEAM", None)
             run_env.pop("ANIL_COOP_BATTLES", None)
             if args.coop_battles:
                 run_env.update(ANIL_COOP_BATTLES="1", ANIL_COOP_PERSONAL_TEAM="1")
-            if args.personal_team or args.qa_scenario.startswith("personal"):
+            if args.personal_team or args.qa_scenario.startswith("personal") or args.qa_scenario == "story-gary":
                 run_env["ANIL_COOP_PERSONAL_TEAM"] = "1"
             if args.qa_battle_bot:
                 run_env.update(ANIL_COOP_QA_BOT=args.qa_battle_bot, ANIL_COOP_QA_SCENARIO=args.qa_scenario)
@@ -140,6 +142,8 @@ def main() -> int:
                 run_env["ANIL_COOP_PRESENCE_QA"] = "1"
             if args.qa_presence_network:
                 run_env["ANIL_COOP_PRESENCE_QA"] = "network"
+            if args.qa_story_inspect:
+                run_env["ANIL_COOP_STORY_QA"] = "inspect"
             if args.qa_2v2:
                 run_env["ANIL_COOP_QA_2V2"] = "1"
             if client["client"] in args.qa_wild_client:
@@ -184,6 +188,10 @@ def main() -> int:
             for observation, client in zip(observations, plan):
                 report = Path(client["save_directory"]).parent / "qa-presence-result.json"
                 observation["presence_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
+        if args.qa_story_inspect:
+            for observation, client in zip(observations, plan):
+                report = Path(client["save_directory"]).parent / "qa-story-events.json"
+                observation["story_qa"] = {"maps": len(read_json(report).get("maps", []))} if report.is_file() else {"error": "missing result"}
         write_new(result_path, result)
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return 0 if all(item["bootstrap_observed"] and

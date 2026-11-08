@@ -20,6 +20,11 @@ module AnilCoopQA
     save_data = SaveData.get_data_from_file(path) # no conversion/write-back
     SaveData.load_bootup_values(save_data)
     Game.load(save_data)
+    if scenario == "story-gary"
+      $map_factory.setup(29) # The actual Oak-lab map, only in this QA process.
+      $game_player.moveto(9, 14)
+      $game_variables[56] = 0 # First original Gary variant on both isolated profiles.
+    end
     if ["personal-reserves", "personal-share"].include?(scenario)
       # Explicit synthetic six-slot QA party, only in RAM; never a fallback for users.
       source = $player.party.fetch(0)
@@ -45,12 +50,12 @@ module AnilCoopQA
       peers = AnilCoop.instance_variable_get(:@peers)
       AnilCoop.connected? && peers.length == 1 && peers.values.all? { |p| p["position"].is_a?(Hash) }
     end
-    AnilCoop.qa_trainer
-    event = $game_map.events.fetch(9000)
+    AnilCoop.qa_trainer unless scenario == "story-gary"
+    event = $game_map.events.fetch(scenario == "story-gary" ? 3 : 9000)
     before_money = $player.money
     before_exp = $player.party.map(&:exp)
     visual = ENV["ANIL_COOP_QA_BOT"] == "visual"
-    if scenario == "personal-event"
+    if ["personal-event", "story-gary"].include?(scenario)
       # Fix only the QA encounter initiator, so this victory scenario uses the
       # Normal profile's native Azul team rather than a random host race.
       if ENV["ANIL_COOP_NAME"] == "client04"
@@ -60,7 +65,18 @@ module AnilCoopQA
       remote_id = AnilCoop.instance_variable_get(:@peers).keys.first
       remote_before = AnilCoop.instance_variable_get(:@peers)[remote_id]["position"].dup
       interpreter = pbMapInterpreter
-      interpreter.setup(event.list, event.id)
+      if scenario == "story-gary"
+        page = event.instance_variable_get(:@event).pages.fetch(1)
+        event.instance_variable_set(:@page, page)
+        event.instance_variable_set(:@list, page.list)
+        event.instance_variable_set(:@trigger, page.trigger)
+        raise "Gary page unrecognized" unless AnilCoop.first_gary_event?(event, [:AZUL1, "Azul", 1])
+        setBattleRule("midbattleScript", :azul_combate_inicial)
+        # Execute the exact original conditional commands after the cutscene.
+        interpreter.setup(page.list[136..143], event.id)
+      else
+        interpreter.setup(event.list, event.id)
+      end
       while interpreter.running?
         Graphics.update
         AnilCoop.tick($scene)
@@ -105,6 +121,8 @@ module AnilCoopQA
     result = AnilCoop.instance_variable_get(:@last_qa_result) || { error: "no result" }
     10.times { Graphics.update; AnilCoop.tick($scene) }
     result[:event_victory] = $game_self_switches[[$game_map.map_id, 9000, "A"]] if scenario == "personal-event"
+    result[:story_victory] = AnilCoop.instance_variable_get(:@qa_story_return) &&
+      $game_variables[1] == 1 if scenario == "story-gary"
     result[:personal_money_delta] = $player.money - before_money
     result[:personal_exp_delta] = personal_exp if AnilCoop.personal_team?
     result[:connected_after] = AnilCoop.connected?
@@ -194,9 +212,10 @@ module AnilCoopQA
       result[:pass] &&= result.dig(:observed, :poison) && result.dig(:observed, :item_consumed)
     elsif scenario == "automatic-target"
       result[:pass] &&= result.dig(:observed, :automatic_target_wire)
-    elsif ["personal-npc", "personal-event"].include?(scenario)
+    elsif ["personal-npc", "personal-event", "story-gary"].include?(scenario)
       result[:pass] &&= result[:trainer_completed] && result[:personal_money_delta] > 0
       result[:pass] &&= result[:event_victory] if scenario == "personal-event"
+      result[:pass] &&= result[:story_victory] if scenario == "story-gary"
     elsif scenario == "personal-share"
       delta = result[:personal_exp_delta]
       result[:pass] &&= [1, 3, 5].all? { |i| delta[i] == 0 } && delta[2] > 0 && delta[4] > 0 &&
@@ -420,7 +439,7 @@ module AnilCoopQA
 
   module EventDriver
     def trainer_choice(key, text, commands, &block)
-      return super unless AnilCoopQA.scenario == "personal-event"
+      return super unless ["personal-event", "story-gary"].include?(AnilCoopQA.scenario)
       super do
         state = instance_variable_get(:@trainer_states)[key]
         me = state["participants"].find { |p| p["id"] == instance_variable_get(:@id) }
@@ -439,17 +458,19 @@ module AnilCoopQA
     end
 
     def choose_team(event)
-      return super unless AnilCoopQA.scenario == "personal-event"
+      return super unless ["personal-event", "story-gary"].include?(AnilCoopQA.scenario)
       trainer_send("trainer_team", event, team: select_team([0]), trainer: trainer_snapshot)
       true
     end
 
     def qa_coop_battle(state, scene: nil, visual: true)
-      if AnilCoopQA.scenario == "personal-event"
+      if ["personal-event", "story-gary"].include?(AnilCoopQA.scenario)
         visual = ENV["ANIL_COOP_QA_BOT"] == "visual"
         scene = visual ? AnilCoopQA::VisualScene.new : AnilCoopQA::EngineScene.new
       end
-      super(state, scene: scene, visual: visual)
+      result = super(state, scene: scene, visual: visual)
+      instance_variable_set(:@qa_story_return, result) if AnilCoopQA.scenario == "story-gary"
+      result
     end
   end
 

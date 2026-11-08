@@ -91,8 +91,10 @@ module AnilCoop
     @last_qa_result = nil
     @last_battle_state = state
     outcome_variable = $game_temp.battle_rules["outcomeVar"] || 1
+    can_lose = $game_temp.battle_rules["canLose"] || false
     run_coop_battle(state, scene: scene, visual: visual)
     if state["enemy_team"] && @last_qa_result && @last_qa_result[:completed]
+      BattleCreationHelperMethods.after_battle(@last_qa_result[:decision], can_lose) if @story_battle
       BattleCreationHelperMethods.set_outcome(@last_qa_result[:decision], outcome_variable, true)
     end
     $game_temp.clear_battle_rules
@@ -159,6 +161,8 @@ module AnilCoop
       data = state.fetch("enemy_trainer")
       foe = NPCTrainer.new(data["name"], data["trainer_type"].to_sym)
       foe.id, foe.language = data["id"], data["language"]
+      foe.lose_text = data["lose_text"] if data.key?("lose_text")
+      foe.win_text = data["win_text"] if data.key?("win_text")
       p2 = state["enemy_team"].map { |p| team_pokemon(p) }
       enemy_origins = (0...p2.length).to_a
       if p2.length == 1

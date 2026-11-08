@@ -11,6 +11,15 @@ def personal_trainer():
     return dict(id=100, name="Owner", gender=0, language=2, trainer_type="POKEMONTRAINER_Red")
 
 
+class TrainerSpeechTests(unittest.TestCase):
+    def test_original_speeches_are_bounded(self):
+        trainer = personal_trainer()
+        trainer.update(lose_text="¡La suerte del principiante!", win_text="Nos vemos, \n\\PN.")
+        self.assertTrue(validate_trainer(trainer))
+        self.assertFalse(validate_trainer(dict(trainer, lose_text="x" * 501)))
+        self.assertFalse(validate_trainer(dict(trainer, win_text="bad\x00text")))
+
+
 def personal_pokemon(slot=0):
     return dict(key=f"100:{1000 + slot}", slot=slot, species="BULBASAUR", name="Bulbasaur",
                 level=10, exp=560, form=0, pid=1000 + slot,

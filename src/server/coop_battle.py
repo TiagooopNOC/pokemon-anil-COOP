@@ -27,11 +27,15 @@ def _data_id(value):
 
 
 def validate_trainer(trainer):
+    required = {"id", "name", "gender", "language", "trainer_type"}
     return (isinstance(trainer, dict) and
-            trainer.keys() == {"id", "name", "gender", "language", "trainer_type"} and
+            required <= trainer.keys() and trainer.keys() <= required | {"lose_text", "win_text"} and
             _integer(trainer["id"], 0, 2**32 - 1) and _text(trainer["name"]) and
             _integer(trainer["gender"], 0, 2) and _integer(trainer["language"], 0, 20) and
-            _data_id(trainer["trainer_type"]))
+            _data_id(trainer["trainer_type"]) and
+            all(isinstance(trainer[field], str) and len(trainer[field]) <= 500 and
+                all(ord(char) >= 32 or char in "\n\t" for char in trainer[field])
+                for field in ("lose_text", "win_text") if field in trainer))
 
 
 def validate_team(team, max_size=3):
