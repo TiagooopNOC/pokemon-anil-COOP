@@ -297,29 +297,24 @@ def launch_plan(repo: Path, clients: list[str]) -> dict:
     return {"status": "PLAN_ONLY", "runtime": doctor(repo)["runtime"], "clients": result}
 
 
-def orphan_game_slot_owner(snapshot: dict, now: float) -> str | None:
-    """Reclaim only an old lease from this launcher with no Game.exe running."""
-    slots = snapshot.get("slots", [])
-    if not slots or snapshot.get("running"):
-        return None
-    active = [s.get("lease") for s in slots if not s.get("free")]
-    if not active or any(not isinstance(lease, dict) for lease in active):
-        return None
-    owners = {lease.get("owner") for lease in active}
-    if len(owners) != 1:
-        return None
-    owner = next(iter(owners))
-    if not isinstance(owner, str) or not owner.startswith("anil-h0-"):
-        return None
-    if any(not isinstance(lease.get("since"), (int, float)) or
-           now - lease["since"] < 20 for lease in active):
-        return None
-    return owner
+def windows_profile_lock(path: Path, locking_module):
+    """OS-owned byte lock: a crashed launcher cannot leave a timed lease behind."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("a+b")
+    try:
+        if path.stat().st_size == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        locking_module.locking(handle.fileno(), locking_module.LK_NBLCK, 1)
+        return handle
+    except OSError:
+        handle.close()
+        raise SafetyError("Esta copia de Añil ya está abierta. Cerrá su ventana antes de reintentar.")
 
 
 def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bool = False, personal_team: bool = False, coop_battles: bool = False) -> dict:
-    # Wine support is intentionally gated until its process/slot adapter is tested.
-    # The final target is native Windows, for which gameslot has PID identity checks.
+    # Wine uses its separate launcher; Windows uses an OS-owned per-profile lock.
     if not doctor(repo)["native_windows_x64"]:
         raise SafetyError("Runtime blocked: native Windows x64 required for this launcher")
     plan = launch_plan(repo, clients)
@@ -334,32 +329,18 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bo
                 not profile.joinpath("saves").is_dir() or
                 profile.joinpath("profile-id.txt").read_text().strip() != workspace[client["client"]]["profile_id"]):
             raise SafetyError("Client save isolation preflight failed")
-    if not gameslot.is_file():
-        raise SafetyError("Provide the reviewed coop-anything/tools/gameslot/gameslot.py")
-    state = no_links(repo / "local/gameslot")
-    state.mkdir(parents=True, exist_ok=True)
-    cfg = state / "gameslot_config.json"
-    if not cfg.exists():
-        write_new(cfg, {"slots": 4, "min_free_gb": 3.0, "process_name": "Game.exe"})
+    import msvcrt
+    locks = []
     owner = "anil-h0-" + uuid.uuid4().hex
-    env = dict(os.environ, GAMESLOT_DIR=str(state))
-    def slot(*args):
-        subprocess.run([sys.executable, "-I", str(gameslot), *args, "--owner", owner],
-                       env=env, check=True, capture_output=True, text=True)
-    # Exclusive over all four slots: selected profiles can never overlap another run.
     try:
-        slot("acquire", "--exclusive", "--ttl", "300", "--wait", "0")
-    except subprocess.CalledProcessError as error:
-        if error.returncode != 3:
-            raise
-        result = subprocess.run([sys.executable, "-I", str(gameslot), "status"],
-                                env=env, check=True, capture_output=True, text=True)
-        orphan = orphan_game_slot_owner(json.loads(result.stdout), time.time())
-        if not orphan:
-            raise SafetyError("Ya hay un juego abierto o iniciándose. Cerralo y reintentá en unos segundos.") from error
-        subprocess.run([sys.executable, "-I", str(gameslot), "release", "--owner", orphan],
-                       env=env, check=True, capture_output=True, text=True)
-        slot("acquire", "--exclusive", "--ttl", "300", "--wait", "0")
+        for client in plan["clients"]:
+            locks.append(windows_profile_lock(Path(client["save_directory"]).parent / "coop-game.lock", msvcrt))
+    except BaseException:
+        for handle in locks:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            handle.close()
+        raise
     processes, handles = [], []
     try:
         for client in plan["clients"]:
@@ -391,12 +372,7 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bo
             process = subprocess.Popen(client["command"], cwd=client["cwd"], env=run_env,
                                        stdout=handle, stderr=subprocess.STDOUT)
             processes.append(process)
-            slot("register-pid", "--pid", str(process.pid))
-        renewed = time.monotonic()
         while any(p.poll() is None for p in processes):
-            if time.monotonic() - renewed >= 60:
-                slot("acquire", "--exclusive", "--ttl", "300", "--wait", "0")
-                renewed = time.monotonic()
             time.sleep(0.25)
         codes = [p.returncode for p in processes]
         if any(codes):
@@ -418,7 +394,10 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bo
                     process.wait()
         for handle in handles:
             handle.close()
-        slot("release")
+        for handle in locks:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            handle.close()
 
 
 def package(repo: Path, *, alpha: bool = False, output_name: str | None = None) -> dict:

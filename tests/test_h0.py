@@ -39,17 +39,33 @@ class WorkspaceSafety(unittest.TestCase):
     def prepare(self, count=4):
         return h0.prepare(self.repo, self.source, count)
 
-    def test_only_old_owned_idle_game_slot_can_be_reclaimed(self):
-        lease = {"owner": "anil-h0-previous", "since": 100.0, "procs": [{"pid": 123}]}
-        snapshot = {"slots": [{"free": False, "lease": lease}], "running": []}
-        self.assertEqual(h0.orphan_game_slot_owner(snapshot, 125.0), "anil-h0-previous")
-        self.assertIsNone(h0.orphan_game_slot_owner(snapshot, 110.0))
-        self.assertIsNone(h0.orphan_game_slot_owner({**snapshot, "running": [123]}, 125.0))
-        self.assertIsNone(h0.orphan_game_slot_owner({"slots": [{"free": False,
-            "lease": {**lease, "owner": "another-program"}}], "running": []}, 125.0))
-        self.assertIsNone(h0.orphan_game_slot_owner({"slots": [
-            {"free": False, "lease": lease},
-            {"free": False, "lease": {**lease, "owner": "anil-h0-other"}}], "running": []}, 125.0))
+    def test_windows_profile_lock_releases_after_launcher_closes(self):
+        class FakeWindowsLocks:
+            LK_NBLCK = 1
+            LK_UNLCK = 2
+            held = set()
+
+            @classmethod
+            def locking(cls, fd, mode, _length):
+                identity = os.fstat(fd).st_ino
+                if mode == cls.LK_NBLCK:
+                    if identity in cls.held:
+                        raise OSError("already locked")
+                    cls.held.add(identity)
+                else:
+                    cls.held.remove(identity)
+
+        path = self.base / "profile/coop-game.lock"
+        first = h0.windows_profile_lock(path, FakeWindowsLocks)
+        with self.assertRaises(h0.SafetyError):
+            h0.windows_profile_lock(path, FakeWindowsLocks)
+        first.seek(0)
+        FakeWindowsLocks.locking(first.fileno(), FakeWindowsLocks.LK_UNLCK, 1)
+        first.close()
+        second = h0.windows_profile_lock(path, FakeWindowsLocks)
+        second.seek(0)
+        FakeWindowsLocks.locking(second.fileno(), FakeWindowsLocks.LK_UNLCK, 1)
+        second.close()
 
     def test_four_independent_copies_original_and_plugins_unchanged(self):
         original = h0.snapshot(self.source)

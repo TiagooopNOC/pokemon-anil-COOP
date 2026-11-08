@@ -16,9 +16,9 @@ adaptadores ni un servidor multijugador. No se ejecutó git pull ni se utilizaro
 cuentas para issues/PR; no se publicó información del propietario.
 
 GameSlot se incluye sin modificaciones en `vendor/gameslot/`, con su licencia MIT,
-revisión y SHA-256 en el README de ese directorio. Los lanzadores lo usan para
-reservar procesos/perfiles tanto en Wine como en Windows; Windows nativo sigue
-pendiente de ejecución. El juego, sus plugins y VMS no se redistribuyen.
+revisión y SHA-256 en el README de ese directorio. El lanzador Wine lo usa para
+reservar procesos; el lanzador Windows usa un bloqueo del sistema por perfil,
+que se libera si el proceso termina. El juego, sus plugins y VMS no se redistribuyen.
 
 ## Voltseon's Multiplayer Solution (VMS)
 
