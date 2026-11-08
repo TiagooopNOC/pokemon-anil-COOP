@@ -247,3 +247,14 @@ overlay y abrió client03 bajo Wine sin bot ni NPC QA. El loader cargó sin erro
 Se cerró intencionalmente a los 18 s (timeout 124); no se controló una partida.
 La ruta Windows está preparada con Game.exe nativo y no usa Wine; no se ejecutó
 Windows durante esta validación.
+
+### Menú multijugador — 2026-11-08
+
+El auxiliar nuevo pasó dos pruebas focalizadas: código/capacidad de sala y una
+conexión autenticada a través del puente local real, con cierre del servidor.
+En `client03` bajo Wine, Game.exe cargó el menú nativo, añadió «Multijugador»,
+creó la sala desde Ruby y recibió la confirmación de conexión. La prueba usó
+llamadas internas programadas, no teclado o mouse humanos. Resultado privado:
+`local/clients/client03/profile/qa-multiplayer-result.json` (`pass: true`).
+Falta probar navegación humana, unión de un segundo juego desde el menú,
+dos computadoras y Windows x64 nativo. Ningún guardado personal se modificó.

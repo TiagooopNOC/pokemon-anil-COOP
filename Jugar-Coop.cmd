@@ -1,4 +1,3 @@
 @echo off
 cd /d "%~dp0"
-py -3 tools\play.py
-if errorlevel 1 pause
+py -3w tools\launch_menu.py

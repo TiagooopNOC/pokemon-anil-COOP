@@ -210,7 +210,7 @@ class WorkspaceSafety(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("synthetic")
         h0.package(self.repo, alpha=True)
-        with zipfile.ZipFile(self.repo / "dist/anil-coop-alpha.zip") as z:
+        with zipfile.ZipFile(self.repo / "dist/anil-coop-alpha-menu.zip") as z:
             names = z.namelist()
             self.assertIn("Jugar-Coop.cmd", names)
             self.assertIn("vendor/gameslot/LICENSE", names)

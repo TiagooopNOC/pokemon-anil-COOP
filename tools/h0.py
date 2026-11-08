@@ -400,7 +400,7 @@ def package(repo: Path, *, alpha: bool = False) -> dict:
     if alpha:
         names += ["Jugar-Coop.cmd", "jugar-coop.sh", "vendor/gameslot/gameslot.py",
                   "vendor/gameslot/LICENSE", "vendor/gameslot/README.md"]
-    out = no_links(repo / ("dist/anil-coop-alpha.zip" if alpha else "dist/anil-coop-h0-tools.zip"))
+    out = no_links(repo / ("dist/anil-coop-alpha-menu.zip" if alpha else "dist/anil-coop-h0-tools.zip"))
     out.parent.mkdir(exist_ok=True)
     # Deterministic archive, own source only, refuses to overwrite a prior deliverable.
     with zipfile.ZipFile(out, "x", compression=zipfile.ZIP_DEFLATED) as z:

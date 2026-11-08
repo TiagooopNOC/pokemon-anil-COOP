@@ -1,3 +1,3 @@
 #!/bin/sh
 cd -- "$(dirname -- "$0")" || exit 1
-exec python3 -B tools/play.py "$@"
+exec python3 -B tools/launch_menu.py "$@"

@@ -7,7 +7,7 @@ reales bajo Wine y órdenes programadas; faltan controles humanos de punta a pun
 dos computadoras físicas y Windows nativo.
 
 **Empezar:** `Jugar-Coop.cmd` en Windows x64 o `./jugar-coop.sh` en Linux Mint.
-El asistente prepara una copia y permite crear/unirse por LAN o VPN privada.
+Elegí **Multijugador** en la pantalla principal para crear/unirte por LAN o VPN privada.
 Requisitos, pasos y límites: [guía breve de la alfa](docs/alpha.md).
 Para generar el ZIP sin juego ni guardados: `python3 -B tools/h0.py package --alpha`.
 La exploración admite hasta cuatro clientes; los combates cooperativos solo dos.

@@ -156,6 +156,7 @@ module AnilCoop
     when "battle_step", "battle_abort"
       battle_receive(message) if respond_to?(:battle_receive)
     when "error"
+      @connection_error = message["reason"]
       log("server error #{message["reason"]}")
       if message["reason"].to_s.start_with?("battle_")
         @battle_failure = message["reason"] if @active_battle
@@ -193,7 +194,7 @@ module AnilCoop
   # Battle runs inside the same game process but stops Scene_Map updates.
   # Keep the last map position alive while this player's battle remains local.
   def self.battle_tick
-    return unless ENV["ANIL_COOP_SESSION"] && $game_map
+    return unless ENV["ANIL_COOP_SESSION"]
     connect
     network
     now = Time.now.to_f
