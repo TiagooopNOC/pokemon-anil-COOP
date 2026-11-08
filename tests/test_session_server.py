@@ -82,6 +82,7 @@ class SessionServerTests(unittest.TestCase):
         self.assertTrue(private_bind("127.0.0.1"))
         self.assertTrue(private_bind("192.168.1.10"))
         self.assertTrue(private_bind("100.101.10.5"))
+        self.assertTrue(private_bind("25.101.10.5"))  # Hamachi virtual IPv4
         self.assertFalse(private_bind("0.0.0.0"))
         self.assertFalse(private_bind("8.8.8.8"))
         self.assertFalse(private_bind("fc00::1"))

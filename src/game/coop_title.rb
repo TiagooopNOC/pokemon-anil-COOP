@@ -2,7 +2,7 @@
 module AnilCoop
   MENU_ERRORS = {
     "auth_failed" => "Código de sala incorrecto.",
-    "no_session" => "Esa sala no existe todavía.",
+    "no_session" => "La IP responde, pero esa sala no está abierta allí. Comprobá IP y código con el anfitrión.",
     "session_exists" => "La sala ya está abierta.",
     "session_full" => "La sala está llena."
   }.freeze
@@ -86,8 +86,7 @@ module AnilCoop
         begin
           if choice == 0
             addresses = status["addresses"] || []
-            host = addresses.length == 1 ? addresses[0] :
-              pbEnterText("Tu IP privada LAN/VPN", 7, 15, addresses[0] || "")
+            host = pbEnterText("Tu IP LAN/Tailscale/Hamachi", 7, 15, addresses[0] || "")
             next if host.to_s.empty?
             data = menu_start("create", host)
             pbMessage("Sala creada: #{data['code']}\nIP: #{host}\n" \

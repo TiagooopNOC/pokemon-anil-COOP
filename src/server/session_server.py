@@ -27,7 +27,8 @@ LOCAL_SECRET = "local-development-only"
 
 def private_bind(address):
     ip = ipaddress.ip_address(address)
-    networks = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")
+    # Hamachi assigns 25/8 virtual IPv4 addresses. Bind remains exact-address only.
+    networks = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "25.0.0.0/8")
     return ip.version == 4 and (
         ip.is_loopback or any(ip in ipaddress.ip_network(n) for n in networks))
 

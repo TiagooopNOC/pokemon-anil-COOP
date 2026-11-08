@@ -10,14 +10,17 @@ la victoria y el dinero corresponden a quienes participaron.
 1. Cada PC necesita su propia instalación del mismo Pokémon Añil v4.14 (motor
    Essentials 21.1), Python 3.10+ y esta carpeta del mod. El juego no está incluido.
 2. Windows x64: abrir `Jugar-Coop.cmd`. Linux Mint: `./jugar-coop.sh` (Wine instalado).
-3. La primera vez, indicar la carpeta original: el lanzador crea una copia aislada.
-   Después elegir el perfil. Crear/cargar la partida desde esa copia.s
-4. Estar en la misma LAN o VPN privada. El anfitrión elige **Crear**, introduce su
-   IP privada y un código. Comparte IP, código y la clave que aparece en su terminal.
-5. El amigo elige **Unirme** con esos mismos datos. Permitir TCP 17641 en el firewall
+3. La primera vez, elegir la carpeta original en la ventana del sistema: el
+   lanzador crea una copia aislada. No hay que escribir comandos.
+4. En el menú del juego, elegir **Multijugador → Crear partida** e indicar la IP
+   que usarán ambos: `100.64–100.127.x.x` (Tailscale), `25.x.x.x` (Hamachi) o la IP LAN.
+   El valor sugerido puede ser la IP LAN: reemplazarlo si usan una VPN. Compartir
+   esa IP y el código de 12 caracteres mostrado. No hay clave adicional.
+5. El amigo elige **Multijugador → Unirse a un amigo** e ingresa IP y código.
+   Permitir TCP 17641 en el firewall
    solo para esa red privada. No abrir puertos del router ni usar una IP pública.
-6. El anfitrión mantiene abierta su sesión. El juego no tiene límite de diez minutos.
-   Guardar normalmente antes de cerrar; el lanzador nunca adopta la partida del amigo.
+6. Ambos regresan al menú principal y eligen **Continuar** o **Partida Nueva**.
+   Guardar normalmente antes de cerrar; cada partida sigue en su copia.
 
 ## Combatir
 

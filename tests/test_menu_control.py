@@ -24,6 +24,8 @@ class MenuControlTests(unittest.TestCase):
             control.start("join", "8.8.8.8", "ABCD2345EFGH")
         with self.assertRaises(ValueError):
             control.start("join", "127.0.0.1", "short")
+        from src.server.session_server import private_bind
+        self.assertTrue(private_bind("25.42.12.9"))
 
     def test_loopback_menu_creates_room_and_guest_authenticates(self):
         import threading
