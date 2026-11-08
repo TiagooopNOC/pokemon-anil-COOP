@@ -297,6 +297,26 @@ def launch_plan(repo: Path, clients: list[str]) -> dict:
     return {"status": "PLAN_ONLY", "runtime": doctor(repo)["runtime"], "clients": result}
 
 
+def orphan_game_slot_owner(snapshot: dict, now: float) -> str | None:
+    """Reclaim only an old lease from this launcher with no Game.exe running."""
+    slots = snapshot.get("slots", [])
+    if not slots or snapshot.get("running"):
+        return None
+    active = [s.get("lease") for s in slots if not s.get("free")]
+    if not active or any(not isinstance(lease, dict) for lease in active):
+        return None
+    owners = {lease.get("owner") for lease in active}
+    if len(owners) != 1:
+        return None
+    owner = next(iter(owners))
+    if not isinstance(owner, str) or not owner.startswith("anil-h0-"):
+        return None
+    if any(not isinstance(lease.get("since"), (int, float)) or
+           now - lease["since"] < 20 for lease in active):
+        return None
+    return owner
+
+
 def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bool = False, personal_team: bool = False, coop_battles: bool = False) -> dict:
     # Wine support is intentionally gated until its process/slot adapter is tested.
     # The final target is native Windows, for which gameslot has PID identity checks.
@@ -327,7 +347,19 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bo
         subprocess.run([sys.executable, "-I", str(gameslot), *args, "--owner", owner],
                        env=env, check=True, capture_output=True, text=True)
     # Exclusive over all four slots: selected profiles can never overlap another run.
-    slot("acquire", "--exclusive", "--ttl", "300", "--wait", "0")
+    try:
+        slot("acquire", "--exclusive", "--ttl", "300", "--wait", "0")
+    except subprocess.CalledProcessError as error:
+        if error.returncode != 3:
+            raise
+        result = subprocess.run([sys.executable, "-I", str(gameslot), "status"],
+                                env=env, check=True, capture_output=True, text=True)
+        orphan = orphan_game_slot_owner(json.loads(result.stdout), time.time())
+        if not orphan:
+            raise SafetyError("Ya hay un juego abierto o iniciándose. Cerralo y reintentá en unos segundos.") from error
+        subprocess.run([sys.executable, "-I", str(gameslot), "release", "--owner", orphan],
+                       env=env, check=True, capture_output=True, text=True)
+        slot("acquire", "--exclusive", "--ttl", "300", "--wait", "0")
     processes, handles = [], []
     try:
         for client in plan["clients"]:

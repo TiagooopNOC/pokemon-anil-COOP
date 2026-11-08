@@ -39,6 +39,18 @@ class WorkspaceSafety(unittest.TestCase):
     def prepare(self, count=4):
         return h0.prepare(self.repo, self.source, count)
 
+    def test_only_old_owned_idle_game_slot_can_be_reclaimed(self):
+        lease = {"owner": "anil-h0-previous", "since": 100.0, "procs": [{"pid": 123}]}
+        snapshot = {"slots": [{"free": False, "lease": lease}], "running": []}
+        self.assertEqual(h0.orphan_game_slot_owner(snapshot, 125.0), "anil-h0-previous")
+        self.assertIsNone(h0.orphan_game_slot_owner(snapshot, 110.0))
+        self.assertIsNone(h0.orphan_game_slot_owner({**snapshot, "running": [123]}, 125.0))
+        self.assertIsNone(h0.orphan_game_slot_owner({"slots": [{"free": False,
+            "lease": {**lease, "owner": "another-program"}}], "running": []}, 125.0))
+        self.assertIsNone(h0.orphan_game_slot_owner({"slots": [
+            {"free": False, "lease": lease},
+            {"free": False, "lease": {**lease, "owner": "anil-h0-other"}}], "running": []}, 125.0))
+
     def test_four_independent_copies_original_and_plugins_unchanged(self):
         original = h0.snapshot(self.source)
         self.prepare()
