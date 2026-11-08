@@ -82,10 +82,29 @@ class SessionServerTests(unittest.TestCase):
         self.assertEqual(self.receive(b)["player"]["position"]["speed"], 4)
         invalid = dict(valid, seq=2, x=True)
         self.assertEqual(self.exchange(a, invalid)["reason"], "invalid_position")
-        for bad_speed in (True, 0, 7, float("inf"), "4"):
+        for bad_speed in (True, 0, 9, float("inf"), "4"):
             self.assertEqual(self.exchange(a, dict(valid, seq=2, speed=bad_speed))["reason"],
                              "invalid_position")
         self.assertEqual(self.exchange(a, {"type": "position", "map": 1})["reason"], "invalid_position")
+
+    def test_ordered_steps_and_warp_validation(self):
+        sender, observer = self.client(), self.client()
+        self.exchange(sender, {"type": "create", "session": "STEP01", "name": "one"})
+        self.exchange(observer, {"type": "join", "session": "STEP01", "name": "two"})
+        self.receive(sender)  # enter
+        base = {"type": "position", "map": 1, "x": 10, "y": 10,
+                "direction": 6, "pattern": 0, "speed": 5.5, "seq": 0,
+                "sprite": "trainer", "steps": [], "warp": True}
+        sender.sendall((json.dumps(base) + "\n").encode())
+        self.assertEqual(self.receive(observer)["player"]["position"]["x"], 10)
+        turn = dict(base, x=12, y=11, seq=1, steps=[6, 6, 2], warp=False, direction=2)
+        sender.sendall((json.dumps(turn) + "\n").encode())
+        received = self.receive(observer)["player"]["position"]
+        self.assertEqual(received["steps"], [6, 6, 2])
+        self.assertEqual((received["x"], received["y"], received["speed"]), (12, 11, 5.5))
+        self.assertEqual(self.exchange(sender, dict(turn, seq=2, x=13, steps=[2]))["reason"], "invalid_position")
+        self.assertEqual(self.exchange(sender, dict(turn, seq=2, steps=[6, 3, 2]))["reason"], "invalid_position")
+        self.assertEqual(self.exchange(sender, dict(turn, seq=2, steps=[6], warp=True))["reason"], "invalid_position")
 
     def test_auth_and_private_binding(self):
         self.assertTrue(private_bind("127.0.0.1"))

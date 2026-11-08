@@ -1,27 +1,131 @@
-# Opt-in native-engine check of remote sprite motion. No saves, socket or OS input.
+# Opt-in native-engine check of ordered remote steps. No saves or OS input.
+require "digest"
+module AnilCoopPresenceQA
+  def self.network_run
+    save = File.join(AnilCoopDev::SAVE_DIR, "Partida 1.rxdata")
+    before = Digest::SHA256.file(save).hexdigest
+    data = SaveData.get_data_from_file(save)
+    SaveData.load_bootup_values(data)
+    Game.load(data)
+    $game_player.refresh
+    $scene.createSpritesets
+    Graphics.transition(0)
+    deadline = System.uptime + 35
+    loop do
+      Graphics.update
+      AnilCoop.tick($scene)
+      peers = AnilCoop.instance_variable_get(:@peers)
+      break if AnilCoop.connected? && peers.length == 1 && peers.values.first["position"]
+      raise "peer connection timeout" if System.uptime > deadline
+    end
+    sender = ENV["ANIL_COOP_NAME"] == "client03"
+    route = [[0.18, 6, 3.5], [0.36, 6, 3.5],
+             [0.68, 4, 5.5], [0.725, 4, 5.5], [0.77, 4, 5.5],
+             [1.10, 6, 3.5], [1.28, 2, 3.5],
+             [1.60, 6, 5.5], [1.645, 2, 5.5], [1.69, 4, 5.5], [1.735, 8, 5.5],
+             [2.10, 8, 5.5]]
+    remote_position = AnilCoop.instance_variable_get(:@peers).values.first["position"]
+    start_x, start_y = sender ? [$game_player.x, $game_player.y] :
+                                [remote_position["x"], remote_position["y"]]
+    expected_x, expected_y = start_x, start_y
+    route.each do |(_, dir, _)|
+      expected_x += (dir == 6 ? 1 : dir == 4 ? -1 : 0)
+      expected_y += (dir == 2 ? 1 : dir == 8 ? -1 : 0)
+    end
+    started = System.uptime
+    $game_player.through = true if sender
+    next_step = 0
+    samples = 0
+    partial = 0
+    previous = nil
+    seen_multi = false
+    while System.uptime - started < 3.2
+      Graphics.update
+      elapsed = System.uptime - started
+      if sender
+        while next_step < route.length && elapsed >= route[next_step][0]
+          _, dir, speed = route[next_step]
+          $game_player.move_speed = speed
+          before_step = [$game_player.x, $game_player.y]
+          $game_player.move_generic(dir)
+          raise "scripted step blocked" if before_step == [$game_player.x, $game_player.y]
+          next_step += 1
+        end
+      end
+      AnilCoop.tick($scene)
+      next if sender
+      peer = AnilCoop.instance_variable_get(:@peers).values.first
+      seen_multi ||= peer && peer["position"] && peer["position"]["steps"].is_a?(Array) &&
+                     peer["position"]["steps"].length > 1
+      sprite = AnilCoop.instance_variable_get(:@sprites).values.first
+      next unless sprite && !sprite.disposed?
+      character = sprite.character
+      point = [character.real_x, character.real_y]
+      if previous
+        dx, dy = (point[0] - previous[0]).abs, (point[1] - previous[1]).abs
+        raise "diagonal visual frame" if dx > 0.001 && dy > 0.001
+        raise "teleport visual frame" if dx > Game_Map::REAL_RES_X * 0.95 || dy > Game_Map::REAL_RES_Y * 0.95
+        partial += 1 if (dx > 0.001 && dx < Game_Map::REAL_RES_X * 0.5) ||
+                        (dy > 0.001 && dy < Game_Map::REAL_RES_Y * 0.5)
+      end
+      previous = point
+      samples += 1
+    end
+    raise "route incomplete" if sender && next_step != route.length
+    unless sender
+      character = AnilCoop.instance_variable_get(:@sprites).values.first&.character
+      raise "remote endpoint" unless character && character.x == expected_x && character.y == expected_y
+      raise "insufficient animation samples" unless samples > 30 && partial > 8
+      raise "running steps not batched" unless seen_multi
+    end
+    raise "save changed" unless Digest::SHA256.file(save).hexdigest == before
+    { pass: true, sender: sender, route_steps: route.length, samples: samples, partial: partial,
+      ordered_batch: seen_multi, save_unchanged: true }
+  end
+end
+
 $anil_coop_presence_trace = TracePoint.new(:return) do |event|
   next unless event.method_id == :set_up_system && event.defined_class == Game.singleton_class
   $anil_coop_presence_trace.disable
   result = { pass: false }
   begin
+    if ENV["ANIL_COOP_PRESENCE_QA"] == "network"
+      result = AnilCoopPresenceQA.network_run
+    else
     remote = AnilCoopRemoteCharacter.new
-    pos = { "x" => 10, "y" => 10, "direction" => 2, "pattern" => 1, "speed" => 3 }
-    remote.follow_network(pos, 0.0)
+    base = { "map" => 1, "x" => 10, "y" => 10, "direction" => 6,
+             "pattern" => 0, "speed" => 3.5, "seq" => 0, "steps" => [], "warp" => true }
+    remote.follow_network(base, 0.0)
     raise "initial position" unless remote.real_x == 10 * Game_Map::REAL_RES_X
-    remote.follow_network(pos.merge("x" => 11), 1.0)
-    remote.follow_network(pos.merge("x" => 11), 1.125)
-    halfway = remote.real_x
-    raise "walking interpolation" unless halfway > 10 * Game_Map::REAL_RES_X && halfway < 11 * Game_Map::REAL_RES_X
-    remote.follow_network(pos.merge("x" => 11), 1.25)
-    raise "walking destination" unless remote.real_x == 11 * Game_Map::REAL_RES_X
-    remote.follow_network(pos.merge("x" => 12, "speed" => 4, "direction" => 6), 2.0)
-    remote.follow_network(pos.merge("x" => 12, "speed" => 4, "direction" => 6), 2.0625)
-    raise "running interpolation" unless remote.real_x > 11 * Game_Map::REAL_RES_X && remote.real_x < 12 * Game_Map::REAL_RES_X
-    remote.follow_network(pos.merge("x" => 12, "speed" => 4, "direction" => 6), 2.125)
-    raise "running destination" unless remote.real_x == 12 * Game_Map::REAL_RES_X
-    remote.follow_network(pos.merge("x" => 20, "speed" => 4, "direction" => 8), 3.0)
-    raise "warp snap" unless remote.real_x == 20 * Game_Map::REAL_RES_X && remote.direction == 8
-    result = { pass: true, walking: true, running: true, warp: true }
+    cases = [
+      ["walk_straight", 1.0, 1.50, { "x" => 12, "y" => 10, "steps" => [6, 6], "speed" => 3.5 }],
+      ["run_straight", 2.0, 2.25, { "x" => 15, "y" => 10, "steps" => [6, 6, 6], "speed" => 5.5 }],
+      ["walk_turn", 3.0, 3.50, { "x" => 16, "y" => 11, "steps" => [6, 2], "speed" => 3.5 }],
+      ["run_turn", 4.0, 4.30, { "x" => 16, "y" => 13, "steps" => [6, 2, 4, 2], "speed" => 5.5 }],
+      ["stop", 5.0, 5.20, { "x" => 16, "y" => 13, "steps" => [], "speed" => 5.5 }],
+      ["restart", 6.0, 6.20, { "x" => 16, "y" => 12, "steps" => [8], "speed" => 5.5 }]
+    ]
+    cases.each_with_index do |(name, start_t, end_t, update), i|
+      packet = base.merge(update).merge("seq" => i + 1, "warp" => false)
+      previous = [remote.real_x, remote.real_y]
+      t = start_t
+      while t <= end_t + 0.0001
+        remote.follow_network(packet, t)
+        current = [remote.real_x, remote.real_y]
+        dx, dy = (current[0] - previous[0]).abs, (current[1] - previous[1]).abs
+        raise "#{name} diagonal" if dx > 0.001 && dy > 0.001
+        raise "#{name} snapped" if dx > Game_Map::REAL_RES_X * 0.3 || dy > Game_Map::REAL_RES_Y * 0.3
+        previous = current
+        t += 0.005
+      end
+      raise "#{name} destination" unless remote.real_x == packet["x"] * Game_Map::REAL_RES_X &&
+                                          remote.real_y == packet["y"] * Game_Map::REAL_RES_Y
+      base = packet
+    end
+    remote.follow_network(base.merge("seq" => 7, "x" => 20, "y" => 20, "steps" => [], "warp" => true), 7.0)
+    raise "warp snap" unless remote.real_x == 20 * Game_Map::REAL_RES_X && remote.real_y == 20 * Game_Map::REAL_RES_Y
+    result = { pass: true, cases: cases.map(&:first), warp: true }
+    end
   rescue StandardError => e
     result = { pass: false, error: "#{e.class}: #{e.message}", trace: e.backtrace.first(5) }
   ensure

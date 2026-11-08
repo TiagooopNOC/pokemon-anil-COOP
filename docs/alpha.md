@@ -32,9 +32,12 @@ individual original. Los demás jugadores pueden seguir explorando.
 
 ## Comprobación manual de movimiento y objetivos
 
-Con dos PC en la misma sala, caminá, corré, detenete, girá y cambiá de mapa
-alternadamente. El otro jugador debe verse desplazarse entre casillas sin saltos;
-al cambiar de mapa, su sprite debe desaparecer y reaparecer en el mapa correcto.
+Actualizá el mod en ambas PC antes de esta prueba. Con ambos en la misma sala,
+caminá y corré en línea recta, girá 90 grados, detenete y arrancá varias veces;
+probá también un giro rápido mientras corrés y un cambio de mapa. El personaje
+remoto debe recorrer cada esquina por dos tramos ortogonales, sin cortar en
+diagonal ni saltar casillas durante la carrera. Al cambiar de mapa, su sprite
+debe desaparecer y reaparecer en el mapa correcto.
 Contra un NPC ordinario, probá un movimiento que se aplique automáticamente al
 usuario o a un lado (por ejemplo, Salpicadura), luego ataques con objetivo
 elegido y un turno tras debilitar o sustituir un Pokémon. Ambos deben terminar

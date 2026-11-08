@@ -9,7 +9,7 @@ begin
   load "CoopDev/coop_menus.rb"
   load "CoopDev/coop_title.rb" if ENV["ANIL_COOP_MENU"] == "1"
   load "CoopDev/menu_qa.rb" if ENV["ANIL_COOP_MENU_QA"] == "1"
-  load "CoopDev/presence_qa.rb" if ENV["ANIL_COOP_PRESENCE_QA"] == "1"
+  load "CoopDev/presence_qa.rb" if ["1", "network"].include?(ENV["ANIL_COOP_PRESENCE_QA"])
   load "CoopDev/battle_qa.rb" if ENV["ANIL_COOP_QA_BOT"]
   File.open(log_path, "a") { |f| f.puts("#{Time.now.utc} presence script loaded") }
 rescue Exception => e

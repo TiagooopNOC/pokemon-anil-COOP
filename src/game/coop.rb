@@ -5,45 +5,97 @@ require "json"
 class AnilCoopRemoteCharacter < Game_Character
   def name; ""; end
 
-  # Only the sprite's real coordinates move. Never run Game_Character#update:
-  # it would fire map step hooks for a player who is not in this save.
+  # Only the sprite moves; Game_Character#update would run local map step hooks.
   def follow_network(pos, now = System.uptime)
-    x, y = pos["x"], pos["y"]
-    self.direction = pos["direction"]
-    self.move_speed = pos["speed"] if pos["speed"] && pos["speed"] != move_speed
-    if !@remote_initialized || (x - @x).abs + (y - @y).abs > 2 ||
-       (x != @x && y != @y)
-      @x, @y = x, y
-      @real_x, @real_y = x * Game_Map::REAL_RES_X, y * Game_Map::REAL_RES_Y
-      @remote_start = nil
-      @remote_initialized = true
-    elsif x != @x || y != @y
-      distance = (x - @x).abs + (y - @y).abs
-      @remote_from_x, @remote_from_y = @real_x, @real_y
-      @x, @y = x, y
-      tile_time = move_speed >= 6 ? 0.05 : (move_speed >= 5 ? 0.1 : 2.0 / (2**move_speed))
-      # Two tiles can arrive in one packet at cycling speed. Catch up before
-      # the next sample instead of building an ever-growing visual delay.
-      @remote_duration = distance == 1 ? tile_time : [tile_time * distance, 0.12].min
-      @remote_start = now
-      @remote_pattern = pos["pattern"]
+    @remote_steps ||= []
+    packet_id = pos.key?("seq") ? pos["seq"] : pos.object_id
+    if packet_id != @remote_packet_id
+      @remote_packet_id = packet_id
+      @remote_direction, @remote_pattern = pos["direction"], pos["pattern"]
+      self.move_speed = pos["speed"] if pos["speed"] && pos["speed"] != move_speed
+      if !@remote_initialized || pos["warp"] || @remote_map != pos["map"]
+        snap_remote(pos["x"], pos["y"])
+        @remote_map = pos["map"]
+      else
+        steps = pos["steps"]
+        if steps.is_a?(Array)
+          target = @remote_steps.reduce([@x, @y]) { |point, dir| remote_endpoint(*point, dir) }
+          target = steps.reduce(target) { |point, dir| remote_endpoint(*point, dir) }
+          if target == [pos["x"], pos["y"]] && @remote_steps.length + steps.length <= 32
+            @remote_steps.concat(steps)
+          else
+            snap_remote(pos["x"], pos["y"])
+          end
+        else
+          # Older servers omit steps. Only one cardinal tile is unambiguous.
+          target = @remote_steps.reduce([@x, @y]) { |point, dir| remote_endpoint(*point, dir) }
+          dx, dy = pos["x"] - target[0], pos["y"] - target[1]
+          dir = dx == 1 && dy == 0 ? 6 : dx == -1 && dy == 0 ? 4 :
+                dx == 0 && dy == 1 ? 2 : dx == 0 && dy == -1 ? 8 : nil
+          if dx != 0 || dy != 0
+            dir ? @remote_steps << dir : snap_remote(pos["x"], pos["y"])
+          end
+        end
+      end
     end
     if @remote_start
       fraction = [[(now - @remote_start) / @remote_duration, 0.0].max, 1.0].min
       @real_x = @remote_from_x + ((@x * Game_Map::REAL_RES_X) - @remote_from_x) * fraction
       @real_y = @remote_from_y + ((@y * Game_Map::REAL_RES_Y) - @remote_from_y) * fraction
-      if fraction < 1.0
-        frame_time = pattern_update_speed / 4.0
-        self.pattern = (@remote_pattern + ((now - @remote_start) / frame_time).floor) % 4
-      else
+      if fraction >= 1.0
+        @remote_next_start = @remote_start + @remote_duration
         @remote_start = nil
-        self.pattern = pos["pattern"]
       end
-    else
-      self.pattern = pos["pattern"]
+    end
+    if !@remote_start && !@remote_steps.empty?
+      dir = @remote_steps.shift
+      @remote_from_x, @remote_from_y = @real_x, @real_y
+      @x, @y = remote_endpoint(@x, @y, dir)
+      self.direction = dir
+      @remote_duration = move_speed == 6 ? 0.05 : (move_speed == 5 ? 0.1 : 2.0 / (2**move_speed))
+      @remote_start = @remote_next_start || now
+      @remote_next_start = nil
+      @remote_animation_start = @remote_start
+      @remote_animation_pattern = pattern
+    end
+    @remote_next_start = nil if !@remote_start && @remote_steps.empty?
+    if @remote_start
+      frame_time = pattern_update_speed / 4.0
+      self.pattern = (@remote_animation_pattern + ((now - @remote_animation_start) / frame_time).floor) % 4
+    elsif @remote_steps.empty?
+      self.direction = @remote_direction
+      self.pattern = @remote_pattern
     end
   end
+
+  def remote_endpoint(x, y, dir)
+    case dir
+    when 2 then [x, y + 1]
+    when 4 then [x - 1, y]
+    when 6 then [x + 1, y]
+    when 8 then [x, y - 1]
+    else [x, y]
+    end
+  end
+
+  def snap_remote(x, y)
+    @x, @y = x, y
+    @real_x, @real_y = x * Game_Map::REAL_RES_X, y * Game_Map::REAL_RES_Y
+    @remote_steps.clear
+    @remote_start = nil
+    @remote_next_start = nil
+    @remote_initialized = true
+  end
 end
+
+module AnilCoopPlayerSteps
+  def move_generic(dir, turn_enabled = true)
+    old_x, old_y = @x, @y
+    super
+    AnilCoop.record_step(dir) if (@x - old_x).abs + (@y - old_y).abs == 1
+  end
+end
+Game_Player.prepend(AnilCoopPlayerSteps)
 
 module AnilCoop
   @peers = {}
@@ -56,6 +108,32 @@ module AnilCoop
   @last_ping = 0.0
   @last_connect = 0.0
   @map = nil
+
+  def self.record_step(dir)
+    return unless connected? && [2, 4, 6, 8].include?(dir)
+    @pending_steps ||= []
+    if @pending_steps.length < 24
+      @pending_steps << dir
+    else
+      @steps_overflow = true
+    end
+  end
+
+  def self.position_steps(map, x, y)
+    steps = @pending_steps || []
+    previous = @last_sent_position
+    endpoint = previous && previous[0] == map ? previous[1, 2] : nil
+    steps.each do |dir|
+      break unless endpoint
+      endpoint = [endpoint[0] + (dir == 6 ? 1 : dir == 4 ? -1 : 0),
+                  endpoint[1] + (dir == 2 ? 1 : dir == 8 ? -1 : 0)]
+    end
+    warp = @steps_overflow || endpoint != [x, y]
+    @pending_steps = []
+    @steps_overflow = false
+    @last_sent_position = [map, x, y]
+    [warp ? [] : steps, !!warp]
+  end
 
   def self.log(message)
     File.open(File.join(AnilCoopDev::PROFILE, "coop.log"), "a") { |f| f.puts("#{Time.now.utc} #{message}") }
@@ -157,6 +235,9 @@ module AnilCoop
     @socket = nil
     @id = nil
     @peers.clear
+    @pending_steps = []
+    @last_sent_position = nil
+    @steps_overflow = false
     @trainer_states.clear
     clear_sprites
     log("disconnected")
@@ -413,10 +494,11 @@ module AnilCoop
       sprite_name = $game_player.character_name.to_s
       unless sprite_name.empty?
         @sequence += 1
+        steps, warp = position_steps($game_map.map_id, $game_player.x, $game_player.y)
         queue(type: "position", map: $game_map.map_id, x: $game_player.x,
               y: $game_player.y, direction: $game_player.direction,
               pattern: $game_player.pattern, speed: $game_player.move_speed,
-              sprite: sprite_name, seq: @sequence)
+              sprite: sprite_name, seq: @sequence, steps: steps, warp: warp)
       end
     end
     if @map != $game_map.map_id

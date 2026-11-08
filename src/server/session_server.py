@@ -129,12 +129,33 @@ class State:
                 if not isinstance(sprite, str) or not VALID_SPRITE.fullmatch(sprite):
                     return {"type": "error", "reason": "invalid_sprite"}, identity
                 speed = message.get("speed", 4)
-                if type(speed) not in (int, float) or not math.isfinite(speed) or not 1 <= speed <= 6:
+                if type(speed) not in (int, float) or not math.isfinite(speed) or not 1 <= speed <= 8:
                     return {"type": "error", "reason": "invalid_position"}, identity
+                steps = message.get("steps")
+                warp = message.get("warp", False)
+                if steps is not None:
+                    if (not isinstance(steps, list) or len(steps) > 24 or
+                            any(type(direction) is not int or direction not in (2, 4, 6, 8)
+                                for direction in steps) or type(warp) is not bool or (warp and steps)):
+                        return {"type": "error", "reason": "invalid_position"}, identity
+                    previous = player["position"]
+                    if not warp:
+                        if not previous or previous["map"] != message["map"]:
+                            return {"type": "error", "reason": "invalid_position"}, identity
+                        endpoint_x, endpoint_y = previous["x"], previous["y"]
+                        for direction in steps:
+                            endpoint_x += (direction == 6) - (direction == 4)
+                            endpoint_y += (direction == 2) - (direction == 8)
+                        if (endpoint_x, endpoint_y) != (message["x"], message["y"]):
+                            return {"type": "error", "reason": "invalid_position"}, identity
                 player["seq"] = message["seq"]
                 player["position"] = {k: message[k] for k in keys if k != "seq"}
                 player["position"]["sprite"] = sprite
                 player["position"]["speed"] = speed
+                player["position"]["seq"] = message["seq"]
+                if steps is not None:
+                    player["position"]["steps"] = steps
+                    player["position"]["warp"] = warp
                 self.broadcast(room, {"type": "position", "player": self.public(player)}, except_sock=sock)
                 return None, identity
             if kind == "ping":

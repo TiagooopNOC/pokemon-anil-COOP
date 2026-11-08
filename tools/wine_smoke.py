@@ -32,6 +32,7 @@ def main() -> int:
     parser.add_argument("--qa-2v2", action="store_true", help="Experimental NPC fixture, temporary teams, no rewards/saves")
     parser.add_argument("--qa-battle-bot", choices=("engine", "visual"))
     parser.add_argument("--qa-presence", action="store_true", help="Run native remote-motion checks without OS input")
+    parser.add_argument("--qa-presence-network", action="store_true", help="Run ordered motion between two native engines")
     parser.add_argument("--play", action="store_true", help="Run until the player closes the game")
     parser.add_argument("--coop-battles", action="store_true")
     parser.add_argument("--personal-team", action="store_true")
@@ -50,6 +51,8 @@ def main() -> int:
         raise SafetyError("--qa-2v2 requires --qa-trainer, --session and exactly two clients")
     if args.qa_battle_bot and not args.qa_2v2:
         raise SafetyError("--qa-battle-bot requires --qa-2v2")
+    if args.qa_presence_network and (not args.session or len(selected) != 2 or args.qa_presence):
+        raise SafetyError("--qa-presence-network needs --session and two clients")
     if args.client and args.clients:
         raise SafetyError("Choose --client or --clients")
     plan = launch_plan(ROOT, selected)["clients"]
@@ -93,7 +96,7 @@ def main() -> int:
         if args.qa_battle_bot and qa_result.exists():
             qa_result.rename(profile / "logs" / ("qa-2v2-previous-" + uuid.uuid4().hex + ".json"))
         presence_result = profile / "qa-presence-result.json"
-        if args.qa_presence and presence_result.exists():
+        if (args.qa_presence or args.qa_presence_network) and presence_result.exists():
             presence_result.rename(profile / "logs" / ("qa-presence-previous-" + uuid.uuid4().hex + ".json"))
     slot_tool = args.gameslot.resolve()
     if not slot_tool.is_file():
@@ -135,6 +138,8 @@ def main() -> int:
                 run_env.update(ANIL_COOP_QA_BOT=args.qa_battle_bot, ANIL_COOP_QA_SCENARIO=args.qa_scenario)
             if args.qa_presence:
                 run_env["ANIL_COOP_PRESENCE_QA"] = "1"
+            if args.qa_presence_network:
+                run_env["ANIL_COOP_PRESENCE_QA"] = "network"
             if args.qa_2v2:
                 run_env["ANIL_COOP_QA_2V2"] = "1"
             if client["client"] in args.qa_wild_client:
@@ -175,7 +180,7 @@ def main() -> int:
             for observation, client in zip(observations, plan):
                 report = Path(client["save_directory"]).parent / "qa-2v2-result.json"
                 observation["battle_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
-        if args.qa_presence:
+        if args.qa_presence or args.qa_presence_network:
             for observation, client in zip(observations, plan):
                 report = Path(client["save_directory"]).parent / "qa-presence-result.json"
                 observation["presence_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
@@ -183,7 +188,7 @@ def main() -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return 0 if all(item["bootstrap_observed"] and
                         (not args.qa_battle_bot or item["battle_qa"]["pass"]) and
-                        (not args.qa_presence or item["presence_qa"]["pass"])
+                        (not (args.qa_presence or args.qa_presence_network) or item["presence_qa"]["pass"])
                         for item in observations) else 2
     finally:
         for client, process, _ in processes:
