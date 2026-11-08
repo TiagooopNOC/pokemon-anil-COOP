@@ -2,6 +2,12 @@
 # Never enabled by normal launchers. Read-only isolated save loading; results discarded.
 module AnilCoopQA
   def self.scenario; ENV["ANIL_COOP_QA_SCENARIO"] || "basic"; end
+  def self.story_loss?; scenario == "story-gary" && ENV["ANIL_COOP_QA_GARY_RESULT"] == "loss"; end
+  def self.story_variant
+    variant = Integer(ENV.fetch("ANIL_COOP_QA_GARY_VARIANT", "1"))
+    raise "QA Gary variant must be 1..3" unless (1..3).include?(variant)
+    variant
+  end
 
   def self.wait_until(seconds = 35)
     deadline = System.uptime + seconds
@@ -23,7 +29,14 @@ module AnilCoopQA
     if scenario == "story-gary"
       $map_factory.setup(29) # The actual Oak-lab map, only in this QA process.
       $game_player.moveto(9, 14)
-      $game_variables[56] = 0 # First original Gary variant on both isolated profiles.
+      $game_variables[56] = story_variant - 1 # Original starter-dependent branch, in RAM only.
+      if story_loss?
+        # Only the QA in-memory party changes; Gary's original team and save stay intact.
+        $player.party.each do |pkmn|
+          pkmn.hp = 1
+          pkmn.moves = [Pokemon::Move.new(:SPLASH)]
+        end
+      end
     end
     if ["personal-reserves", "personal-share"].include?(scenario)
       # Explicit synthetic six-slot QA party, only in RAM; never a fallback for users.
@@ -70,10 +83,11 @@ module AnilCoopQA
         event.instance_variable_set(:@page, page)
         event.instance_variable_set(:@list, page.list)
         event.instance_variable_set(:@trigger, page.trigger)
-        raise "Gary page unrecognized" unless AnilCoop.first_gary_event?(event, [:AZUL1, "Azul", 1])
+        raise "Gary page unrecognized" unless AnilCoop.first_gary_event?(event, [:AZUL1, "Azul", story_variant])
         setBattleRule("midbattleScript", :azul_combate_inicial)
         # Execute the exact original conditional commands after the cutscene.
-        interpreter.setup(page.list[136..143], event.id)
+        first, last = { 1 => [136, 143], 2 => [148, 160], 3 => [161, 174] }.fetch(story_variant)
+        interpreter.setup(page.list[first..last], event.id)
       else
         interpreter.setup(event.list, event.id)
       end
@@ -123,6 +137,9 @@ module AnilCoopQA
     result[:event_victory] = $game_self_switches[[$game_map.map_id, 9000, "A"]] if scenario == "personal-event"
     result[:story_victory] = AnilCoop.instance_variable_get(:@qa_story_return) &&
       $game_variables[1] == 1 if scenario == "story-gary"
+    result[:story_variant] = story_variant if scenario == "story-gary"
+    result[:story_defeat] = !AnilCoop.instance_variable_get(:@qa_story_return) &&
+      $game_variables[1] == 2 if story_loss?
     result[:personal_money_delta] = $player.money - before_money
     result[:personal_exp_delta] = personal_exp if AnilCoop.personal_team?
     result[:connected_after] = AnilCoop.connected?
@@ -191,7 +208,8 @@ module AnilCoopQA
     result[:kind] = visual ? "rendered_engine_programmed_orders" : "engine_without_battle_rendering"
     result[:scenario] = scenario
     result[:menu_checks] = @menu_checks if @menu_checks
-    result[:pass] = result[:completed] && result[:decision] == (scenario == "loss" ? 2 : 1) &&
+    expected_decision = scenario == "loss" || story_loss? ? 2 : 1
+    result[:pass] = result[:completed] && result[:decision] == expected_decision &&
                     result[:connected_after] && result[:save_unchanged] && result[:scene_map] && result[:peer_visible_after]
     result[:pass] &&= result[:map_rendered] if visual
     if AnilCoop.personal_team?
@@ -213,9 +231,11 @@ module AnilCoopQA
     elsif scenario == "automatic-target"
       result[:pass] &&= result.dig(:observed, :automatic_target_wire)
     elsif ["personal-npc", "personal-event", "story-gary"].include?(scenario)
-      result[:pass] &&= result[:trainer_completed] && result[:personal_money_delta] > 0
+      result[:pass] &&= (story_loss? ?
+        (!result[:trainer_completed] && result[:personal_money_delta] == 0 && result[:story_defeat]) :
+        (result[:trainer_completed] && result[:personal_money_delta] > 0))
       result[:pass] &&= result[:event_victory] if scenario == "personal-event"
-      result[:pass] &&= result[:story_victory] if scenario == "story-gary"
+      result[:pass] &&= result[:story_victory] if scenario == "story-gary" && !story_loss?
     elsif scenario == "personal-share"
       delta = result[:personal_exp_delta]
       result[:pass] &&= [1, 3, 5].all? { |i| delta[i] == 0 } && delta[2] > 0 && delta[4] > 0 &&
@@ -235,10 +255,12 @@ module AnilCoopQA
     end
     File.write(File.join(AnilCoopDev::PROFILE, "qa-2v2-result.json"), JSON.pretty_generate(result))
     AnilCoop.log("QA RESULT #{JSON.generate(result)}")
-  rescue StandardError => e
+  rescue Exception => e
+    detail = e.respond_to?(:event_message) ? e.event_message : e.message
+    detail = "#{detail}\nCause: #{e.cause.class}: #{e.cause.message}" if e.cause
     File.write(File.join(AnilCoopDev::PROFILE, "qa-2v2-result.json"),
-               JSON.generate(pass: false, error: "#{e.class}: #{e.message}", trace: e.backtrace.first(8)))
-    AnilCoop.log("QA ERROR #{e.class}: #{e.message}")
+               JSON.generate(pass: false, error: "#{e.class}: #{detail}", trace: e.backtrace.first(8)))
+    AnilCoop.log("QA ERROR #{e.class}: #{detail}")
   ensure
     AnilCoop.disconnect
     exit
@@ -262,6 +284,7 @@ module AnilCoopQA
     def pbCommonAnimationExists(*); false; end
     def pbSetFieldBackground; end
     def pbUpdateHazardSprites; end
+    def pbStartSpeech(*); end
     def pbForceEndSpeech; end
     def pbItemUseAnimation(*); end
     def pbRefreshEverything; end

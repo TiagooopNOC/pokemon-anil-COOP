@@ -92,9 +92,14 @@ module AnilCoop
     @last_battle_state = state
     outcome_variable = $game_temp.battle_rules["outcomeVar"] || 1
     can_lose = $game_temp.battle_rules["canLose"] || false
+    # TrainerBattle.start_core fires this before constructing the battle; its
+    # matching after_battle hook needs the party status/heart-gauge snapshots.
+    EventHandlers.trigger(:on_start_battle) if @story_battle
     run_coop_battle(state, scene: scene, visual: visual)
+    log("story post-battle reached story=#{@story_battle} completed=#{@last_qa_result && @last_qa_result[:completed]}") if @story_battle
     if state["enemy_team"] && @last_qa_result && @last_qa_result[:completed]
       BattleCreationHelperMethods.after_battle(@last_qa_result[:decision], can_lose) if @story_battle
+      log("story after_battle returned") if @story_battle
       BattleCreationHelperMethods.set_outcome(@last_qa_result[:decision], outcome_variable, true)
     end
     $game_temp.clear_battle_rules
@@ -228,6 +233,18 @@ module AnilCoop
 end
 
 class AnilCoopBattle < Battle
+  # Gary's opening line is attached to "foe" in Añil. In a double battle DBK
+  # dispatches that trigger for both foes, even when the second is a copy.
+  def pbDeluxeTriggers(idx_battler, idx_target, *triggers)
+    index = idx_battler.respond_to?(:index) ? idx_battler.index : idx_battler
+    opening = @midbattleScript == :azul_combate_inicial && @turnCount == 0 &&
+      triggers == ["RoundStartCommand", 1] && index.is_a?(Integer) && index.odd?
+    return if opening && @coop_gary_opening_shown
+    result = super
+    @coop_gary_opening_shown = true if opening
+    result
+  end
+
   def initialize(scene, allies, foes, trainers, opponents, local_index, seed, team_sizes: [2, 2], personal: false, enemy_origins: [0, 0])
     @coop_local = local_index
     @coop_team_sizes = team_sizes
