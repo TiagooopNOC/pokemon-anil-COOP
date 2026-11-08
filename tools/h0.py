@@ -389,7 +389,7 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bo
         slot("release")
 
 
-def package(repo: Path, *, alpha: bool = False) -> dict:
+def package(repo: Path, *, alpha: bool = False, output_name: str | None = None) -> dict:
     names = ["README.md", ".gitignore", ".gitattributes"]
     allowed = {".md", ".py", ".rb", ".json", ".ps1"}
     for dirname in PACKAGE_DIRS:
@@ -400,7 +400,11 @@ def package(repo: Path, *, alpha: bool = False) -> dict:
     if alpha:
         names += ["Jugar-Coop.cmd", "jugar-coop.sh", "vendor/gameslot/gameslot.py",
                   "vendor/gameslot/LICENSE", "vendor/gameslot/README.md"]
-    out = no_links(repo / ("dist/anil-coop-alpha-menu.zip" if alpha else "dist/anil-coop-h0-tools.zip"))
+    default_name = "anil-coop-alpha-menu.zip" if alpha else "anil-coop-h0-tools.zip"
+    name = output_name or default_name
+    if not name.endswith(".zip") or Path(name).name != name or name in (".zip", "..zip"):
+        raise SafetyError("Package output must be a ZIP filename within dist/")
+    out = no_links(repo / "dist" / name)
     out.parent.mkdir(exist_ok=True)
     # Deterministic archive, own source only, refuses to overwrite a prior deliverable.
     with zipfile.ZipFile(out, "x", compression=zipfile.ZIP_DEFLATED) as z:
@@ -421,7 +425,9 @@ def main(argv=None) -> int:
     prep.add_argument("--clients", type=int, default=4)
     commands.add_parser("verify")
     commands.add_parser("doctor")
-    commands.add_parser("package").add_argument("--alpha", action="store_true")
+    packaging = commands.add_parser("package")
+    packaging.add_argument("--alpha", action="store_true")
+    packaging.add_argument("--output-name")
     launch = commands.add_parser("launch")
     launch.add_argument("--clients", nargs="+", default=["client01"])
     launch.add_argument("--run", action="store_true")
@@ -435,7 +441,7 @@ def main(argv=None) -> int:
         elif args.command == "doctor":
             result = doctor(ROOT)
         elif args.command == "package":
-            result = package(ROOT, alpha=args.alpha)
+            result = package(ROOT, alpha=args.alpha, output_name=args.output_name)
         elif args.run:
             if not args.gameslot:
                 raise SafetyError("--run requires --gameslot PATH")
