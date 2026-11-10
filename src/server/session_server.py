@@ -24,6 +24,8 @@ VALID_CODE = re.compile(r"[A-Z0-9]{6,12}\Z")
 VALID_NAME = re.compile(r"[\w -]{1,24}\Z", re.UNICODE)
 VALID_SPRITE = re.compile(r"[\w -]{1,80}\Z", re.UNICODE)
 VALID_FOLLOWER_SPRITE = re.compile(r"Followers(?: shiny)?/[\w -]{1,80}\.png\Z", re.UNICODE)
+FOLLOWER_KEYS = frozenset(("map", "x", "y", "direction", "pattern", "seq",
+                           "hue", "speed", "sprite", "steps", "warp"))
 LOCAL_SECRET = "local-development-only"
 
 
@@ -152,7 +154,7 @@ class State:
                 follower = message.get("follower")
                 if follower is not None:
                     follower_keys = ("map", "x", "y", "direction", "pattern", "seq", "hue")
-                    if (not isinstance(follower, dict) or
+                    if (not isinstance(follower, dict) or set(follower) != FOLLOWER_KEYS or
                             any(type(follower.get(k)) is not int for k in follower_keys) or
                             follower["map"] != message["map"] or
                             not 0 <= follower["x"] <= 9999 or not 0 <= follower["y"] <= 9999 or

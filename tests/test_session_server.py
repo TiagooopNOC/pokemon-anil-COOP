@@ -129,6 +129,8 @@ class SessionServerTests(unittest.TestCase):
                          "invalid_follower")
         self.assertEqual(self.exchange(sender, dict(bad, follower=dict(moved, seq=2,
                          sprite="../Game.exe", steps=[], warp=True)))["reason"], "invalid_follower")
+        self.assertEqual(self.exchange(sender, dict(bad, follower=dict(moved, seq=2,
+                         extra="unneeded")))["reason"], "invalid_follower")
         sender.sendall((json.dumps(dict(bad, follower=None)) + "\n").encode())
         self.assertIsNone(self.receive(observer)["player"]["position"]["follower"])
 
