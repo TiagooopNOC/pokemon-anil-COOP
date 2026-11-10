@@ -24,15 +24,20 @@ $anil_coop_menu_trace = TracePoint.new(:return) do |event|
     bitmap = Graphics.snap_to_bitmap
     bitmap.save_to_png(File.join(AnilCoopDev::PROFILE, "qa-multiplayer-title.png"))
     bitmap.dispose
-    data = AnilCoop.menu_start("create", "127.0.0.1")
+    raise "Nombre válido rechazado" unless AnilCoop.valid_multiplayer_name?("Amigo_1")
+    raise "Espacios aceptados" if AnilCoop.valid_multiplayer_name?("Mi amigo")
+    raise "Nombre corto aceptado" if AnilCoop.valid_multiplayer_name?("AB")
+    raise "Nombre largo aceptado" if AnilCoop.valid_multiplayer_name?("Amigo_1234567")
+    data = AnilCoop.menu_start("create", "127.0.0.1", nil, name: "Amigo_1")
     raise "No conectó desde el juego" unless AnilCoop.connected?
+    raise "Nombre no aplicado" unless ENV["ANIL_COOP_NAME"] == "Amigo_1"
     raise "Sala no visible" unless AnilCoop.menu_request("status")["session"]["code"] == data["code"]
     clipboard_before = Input.clipboard
     invite = AnilCoop.invitation(data["host"], data["code"])
     Input.clipboard = invite
     raise "Portapapeles no conserva la invitación" unless Input.clipboard == invite
     raise "Invitación pegada inválida" unless AnilCoop.parse_invitation(Input.clipboard) == [data["host"], data["code"]]
-    result = { pass: true, title_entry: true, connected: true,
+    result = { pass: true, title_entry: true, connected: true, custom_name: true,
                clipboard: true, code_length: data["code"].length }
   rescue StandardError => e
     result = { pass: false, error: "#{e.class}: #{e.message}", trace: e.backtrace.first(5) }

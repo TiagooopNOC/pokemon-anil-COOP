@@ -30,7 +30,24 @@ module AnilCoop
     menu_request("stop")
   end
 
-  def self.menu_start(mode, host, code = nil)
+  def self.valid_multiplayer_name?(value)
+    value.is_a?(String) && !!value.match(/\A[A-Za-z0-9_]{3,12}\z/)
+  end
+
+  def self.prompt_multiplayer_name
+    initial = ENV["ANIL_COOP_NAME"] || ""
+    loop do
+      name = pbEnterText("Nombre multijugador (3–12, sin espacios)", 0, 12, initial)
+      return nil if name.to_s.empty?
+      return name if valid_multiplayer_name?(name)
+      pbMessage("Usá de 3 a 12 letras, números o guion bajo; sin espacios.")
+      initial = name
+    end
+  end
+
+  def self.menu_start(mode, host, code = nil, name: nil)
+    player_name = name || ENV["ANIL_COOP_NAME"] || File.basename(File.dirname(AnilCoopDev::PROFILE))
+    raise "Nombre multijugador inválido (3–12 letras, números o _)." unless valid_multiplayer_name?(player_name)
     data = menu_request(mode, { host: host, code: code })
     disconnect
     @resume = nil
@@ -39,7 +56,7 @@ module AnilCoop
     ENV["ANIL_COOP_SESSION"] = data.fetch("code")
     ENV["ANIL_COOP_PORT"] = data.fetch("port").to_s
     ENV["ANIL_COOP_MODE"] = mode
-    ENV["ANIL_COOP_NAME"] ||= File.basename(File.dirname(AnilCoopDev::PROFILE))
+    ENV["ANIL_COOP_NAME"] = player_name
     deadline = Time.now.to_f + 8
     until connected? || Time.now.to_f >= deadline || @connection_error
       Graphics.update
@@ -109,22 +126,28 @@ module AnilCoop
         return if choice == 3 || choice == -1
         begin
           if choice == 0
+            name = prompt_multiplayer_name
+            next unless name
             addresses = status["addresses"] || []
             host = pbEnterText("Tu IP LAN/Tailscale/Hamachi", 7, 15, addresses[0] || "")
             next if host.to_s.empty?
-            data = menu_start("create", host)
+            data = menu_start("create", host, nil, name: name)
             pbMessage("Sala creada: #{data['code']}\nIP: #{host}\n" \
                       "Compartí estos dos datos con tu amigo.") { battle_tick }
           elsif choice == 1
+            name = prompt_multiplayer_name
+            next unless name
             host = pbEnterText("IP privada de tu amigo", 7, 15)
             next if host.to_s.empty?
             code = pbEnterText("Código de sala", 12, 12).upcase
             next if code.empty?
-            menu_start("join", host, code)
+            menu_start("join", host, code, name: name)
             pbMessage("Conectado. Ya podés cargar tu partida.") { battle_tick }
           elsif choice == 2
+            name = prompt_multiplayer_name
+            next unless name
             host, code = parse_invitation(Input.clipboard)
-            menu_start("join", host, code)
+            menu_start("join", host, code, name: name)
             pbMessage("Conectado. Ya podés cargar tu partida.") { battle_tick }
           end
         rescue StandardError => e

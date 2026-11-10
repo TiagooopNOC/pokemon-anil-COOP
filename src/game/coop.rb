@@ -100,6 +100,7 @@ Game_Player.prepend(AnilCoopPlayerSteps)
 module AnilCoop
   @peers = {}
   @sprites = {}
+  @labels = {}
   @trainer_states = {}
   @sequence = 0
   @buffer = +""
@@ -246,6 +247,38 @@ module AnilCoop
   def self.clear_sprites
     @sprites.each_value { |s| s.dispose unless s.disposed? }
     @sprites.clear
+    @labels.each_value { |entry| entry[:sprite].dispose unless entry[:sprite].disposed? }
+    @labels.clear
+  end
+
+  def self.remove_label(id)
+    entry = @labels.delete(id)
+    entry[:sprite].dispose if entry && !entry[:sprite].disposed?
+  end
+
+  def self.update_label(id, name, character_sprite)
+    name = name.to_s[0, 12]
+    if name.empty? || !character_sprite.visible || !character_sprite.bitmap
+      remove_label(id)
+      return
+    end
+    entry = @labels[id]
+    if !entry || entry[:name] != name
+      remove_label(id)
+      label = BitmapSprite.new(104, 19, Spriteset_Map.viewport)
+      bitmap = label.bitmap
+      pbSetSmallFont(bitmap)
+      width = [[bitmap.text_size(name).width + 10, 24].max, 100].min
+      bitmap.fill_rect((104 - width) / 2, 1, width, 17, Color.new(16, 24, 40, 145))
+      pbDrawTextPositions(bitmap, [[name, 52, -2, :center,
+                                    Color.new(248, 248, 248), Color.new(40, 40, 40)]])
+      entry = { name: name, sprite: label }
+      @labels[id] = entry
+    end
+    label = entry[:sprite]
+    label.x = character_sprite.x - label.bitmap.width / 2
+    label.y = character_sprite.y - character_sprite.oy * character_sprite.zoom_y - label.bitmap.height - 3
+    label.z = character_sprite.z + 20
   end
 
   def self.receive(message)
@@ -267,6 +300,7 @@ module AnilCoop
       if (sprite = @sprites.delete(message["id"]))
         sprite.dispose unless sprite.disposed?
       end
+      remove_label(message["id"])
       log("peer left #{message["id"]}")
     when "trainer_state"
       @trainer_states[[message["map"], message["event"]]] = message
@@ -518,6 +552,7 @@ module AnilCoop
         if (sprite = @sprites.delete(id))
           sprite.dispose unless sprite.disposed?
         end
+        remove_label(id)
         next
       end
       sprite = @sprites[id]
@@ -534,6 +569,7 @@ module AnilCoop
       character.character_name = pos["sprite"]
       character.follow_network(pos)
       sprite.update
+      update_label(id, peer["name"], sprite)
     end
   rescue StandardError => e
     now = Time.now.to_f

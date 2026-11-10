@@ -1,6 +1,69 @@
 # Opt-in native-engine check of ordered remote steps. No saves or OS input.
 require "digest"
 module AnilCoopPresenceQA
+  def self.labels_run
+    save = File.join(AnilCoopDev::SAVE_DIR, "Partida 1.rxdata")
+    before = Digest::SHA256.file(save).hexdigest
+    data = SaveData.get_data_from_file(save)
+    SaveData.load_bootup_values(data)
+    Game.load(data)
+    $game_player.refresh
+    $scene.createSpritesets
+    Graphics.transition(0)
+    deadline = System.uptime + 35
+    loop do
+      Graphics.update
+      AnilCoop.tick($scene)
+      peers = AnilCoop.instance_variable_get(:@peers)
+      labels = AnilCoop.instance_variable_get(:@labels)
+      break if AnilCoop.connected? && peers.length == 1 && labels.length == 1
+      raise "peer label timeout" if System.uptime > deadline
+    end
+    id, peer = AnilCoop.instance_variable_get(:@peers).first
+    sprite = AnilCoop.instance_variable_get(:@sprites).fetch(id)
+    label = AnilCoop.instance_variable_get(:@labels).fetch(id)
+    raise "peer label name" unless label[:name] == peer["name"]
+    raise "peer label position" unless label[:sprite].x + label[:sprite].bitmap.width / 2 == sprite.x &&
+      label[:sprite].y < sprite.y - sprite.oy * sprite.zoom_y
+    bitmap = Graphics.snap_to_bitmap
+    bitmap.save_to_png(File.join(AnilCoopDev::PROFILE, "qa-peer-label.png"))
+    bitmap.dispose
+    marker = Struct.new(:map_id, :id).new($game_map.map_id, 9000)
+    AnilCoop.trainer_send("trainer_wait", marker, forced: false)
+    deadline = System.uptime + 10
+    loop do
+      Graphics.update
+      AnilCoop.tick($scene)
+      state = AnilCoop.instance_variable_get(:@trainer_states)[[marker.map_id, marker.id]]
+      break if state && state["participants"].length == 2
+      raise "label cleanup barrier timeout" if System.uptime > deadline
+    end
+    AnilCoop.clear_sprites
+    raise "label survived map sprite reset" unless AnilCoop.instance_variable_get(:@labels).empty?
+    AnilCoop.tick($scene)
+    raise "label did not return" unless AnilCoop.instance_variable_get(:@labels).key?(id)
+    AnilCoop.trainer_send("trainer_ready", marker, ready: true)
+    deadline = System.uptime + 10
+    loop do
+      Graphics.update
+      AnilCoop.tick($scene)
+      state = AnilCoop.instance_variable_get(:@trainer_states)[[marker.map_id, marker.id]]
+      break if state && state["participants"].length == 2 &&
+        state["participants"].all? { |participant| participant["ready"] }
+      raise "label disconnect barrier timeout" if System.uptime > deadline
+    end
+    release_at = System.uptime + 2
+    while System.uptime < release_at
+      Graphics.update
+      AnilCoop.tick($scene)
+    end
+    AnilCoop.disconnect
+    raise "label survived disconnect" unless AnilCoop.instance_variable_get(:@labels).empty?
+    raise "save changed" unless Digest::SHA256.file(save).hexdigest == before
+    { pass: true, peer_name: peer["name"], centered: true, reset_cleanup: true,
+      reconnect_sprite: true, disconnect_cleanup: true, save_unchanged: true }
+  end
+
   def self.network_run
     save = File.join(AnilCoopDev::SAVE_DIR, "Partida 1.rxdata")
     before = Digest::SHA256.file(save).hexdigest
@@ -89,7 +152,9 @@ $anil_coop_presence_trace = TracePoint.new(:return) do |event|
   $anil_coop_presence_trace.disable
   result = { pass: false }
   begin
-    if ENV["ANIL_COOP_PRESENCE_QA"] == "network"
+    if ENV["ANIL_COOP_PRESENCE_QA"] == "labels"
+      result = AnilCoopPresenceQA.labels_run
+    elsif ENV["ANIL_COOP_PRESENCE_QA"] == "network"
       result = AnilCoopPresenceQA.network_run
     else
     remote = AnilCoopRemoteCharacter.new
