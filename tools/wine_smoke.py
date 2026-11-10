@@ -37,7 +37,7 @@ def main() -> int:
     parser.add_argument("--play", action="store_true", help="Run until the player closes the game")
     parser.add_argument("--coop-battles", action="store_true")
     parser.add_argument("--personal-team", action="store_true")
-    parser.add_argument("--qa-scenario", choices=("basic", "automatic-target", "status", "switch", "loss", "disconnect", "menu-disconnect", "desync", "rewards", "personal", "personal-reserves", "personal-share", "personal-npc", "personal-event", "story-gary", "story-brock"), default="basic")
+    parser.add_argument("--qa-scenario", choices=("basic", "automatic-target", "status", "switch", "loss", "disconnect", "menu-disconnect", "desync", "rewards", "personal", "personal-reserves", "personal-share", "personal-npc", "personal-event", "story-gary", "story-brock", "team-ui"), default="basic")
     parser.add_argument("--qa-starter", action="append", default=[], metavar="CLIENT:SPECIES")
     parser.add_argument("--qa-randomlocke", action="append", default=[], metavar="CLIENT")
     args = parser.parse_args()
@@ -134,7 +134,7 @@ def main() -> int:
             run_env.pop("ANIL_COOP_BATTLES", None)
             if args.coop_battles:
                 run_env.update(ANIL_COOP_BATTLES="1", ANIL_COOP_PERSONAL_TEAM="1")
-            if args.personal_team or args.qa_scenario.startswith("personal") or args.qa_scenario in ("story-gary", "story-brock"):
+            if args.personal_team or args.qa_scenario.startswith("personal") or args.qa_scenario in ("story-gary", "story-brock", "team-ui"):
                 run_env["ANIL_COOP_PERSONAL_TEAM"] = "1"
             if args.qa_battle_bot:
                 run_env.update(ANIL_COOP_QA_BOT=args.qa_battle_bot, ANIL_COOP_QA_SCENARIO=args.qa_scenario)

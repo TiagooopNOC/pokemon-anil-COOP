@@ -9,6 +9,10 @@ module AnilCoop
   end
 
   def self.update_battle_menu
+    if @team_menu_active
+      battle_tick
+      return
+    end
     return unless coop_battle_active?
     battle_tick
     check_battle_transport!

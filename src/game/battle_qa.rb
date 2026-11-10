@@ -29,6 +29,17 @@ module AnilCoopQA
     save_data = SaveData.get_data_from_file(path) # no conversion/write-back
     SaveData.load_bootup_values(save_data)
     Game.load(save_data)
+    if scenario == "team-ui"
+      source = $player.party.fetch(0)
+      $player.party = Array.new(6) do |i|
+        pokemon = Marshal.load(Marshal.dump(source))
+        pokemon.personalID = (source.personalID + 20000 + i) % (2**32)
+        pokemon.heal
+        pokemon
+      end
+      $player.party[3].steps_to_hatch = 1000
+      $player.party[5].hp = 0
+    end
     if story_case?
       if story_brock?
         $map_factory.setup(42) # Original Pewter Gym event, in RAM only.
@@ -82,6 +93,10 @@ module AnilCoopQA
     wait_until do
       peers = AnilCoop.instance_variable_get(:@peers)
       AnilCoop.connected? && peers.length == 1 && peers.values.all? { |p| p["position"].is_a?(Hash) }
+    end
+    if scenario == "team-ui"
+      run_team_ui(path, before)
+      return
     end
     AnilCoop.qa_trainer unless story_case?
     event = $game_map.events.fetch(story_brock? ? 16 : (scenario == "story-gary" ? 3 : 9000))
@@ -325,6 +340,94 @@ module AnilCoopQA
   ensure
     AnilCoop.disconnect
     exit
+  end
+
+  def self.run_team_ui(path, before)
+    AnilCoop.qa_trainer
+    event = $game_map.events.fetch(9000)
+    AnilCoop.trainer_send("trainer_wait", event,
+                          forced: false, prototype: AnilCoop.battle_prototype)
+    wait_until do
+      state = AnilCoop.instance_variable_get(:@trainer_states)[[event.map_id, event.id]]
+      state && state["participants"].length == 2
+    end
+    @team_ui_steps = [[0, "Agregar"], [2, "Agregar"], [4, "Agregar"],
+                      [1, "Agregar"],
+                      [3, "Cancelar"], [5, "Cancelar"], [0, "Bajar"],
+                      [4, "Quitar"], [4, "Agregar"], [2, "Datos"],
+                      [Settings::MAX_PARTY_SIZE, nil]]
+    confirmed = AnilCoop.choose_team(event)
+    wait_until do
+      state = AnilCoop.instance_variable_get(:@trainer_states)[[event.map_id, event.id]]
+      mine = state && state["participants"].find { |p| p["id"] == AnilCoop.instance_variable_get(:@id) }
+      mine && mine["team_count"] == 3
+    end
+    selected = AnilCoop.instance_variable_get(:@selected_team)
+    @team_ui_steps = [[-1, nil]]
+    cancelled = AnilCoop.choose_team(event)
+    result = {
+      scenario: "team-ui", kind: "original_party_scene_programmed_choices",
+      confirmed: confirmed, selected_slots: selected.map { |pokemon| pokemon["slot"] },
+      invalid_slots_rejected: !AnilCoop.team_eligible?($player.party[3]) &&
+                              !AnilCoop.team_eligible?($player.party[5]),
+      fourth_rejected: !!@team_ui_cap_rejected,
+      cancelled: !cancelled, selection_unchanged: AnilCoop.instance_variable_get(:@selected_team) == selected,
+      screenshot: File.exist?(File.join(AnilCoopDev::PROFILE, "qa-team-ui.png")),
+      summary_screenshot: File.exist?(File.join(AnilCoopDev::PROFILE, "qa-team-summary.png")),
+      connected_after: AnilCoop.connected?, save_unchanged: before == Digest::SHA256.file(path).hexdigest
+    }
+    result[:pass] = result[:confirmed] && result[:selected_slots] == [2, 0, 4] &&
+                    result[:invalid_slots_rejected] && result[:fourth_rejected] && result[:cancelled] &&
+                    result[:selection_unchanged] && result[:screenshot] &&
+                    result[:summary_screenshot] && result[:connected_after] && result[:save_unchanged]
+    File.write(File.join(AnilCoopDev::PROFILE, "qa-2v2-result.json"), JSON.pretty_generate(result))
+    AnilCoop.log("QA RESULT #{JSON.generate(result)}")
+  end
+
+  module TeamSceneBot
+    def pbDisplay(text)
+      return super unless AnilCoopQA.scenario == "team-ui"
+      AnilCoopQA.instance_variable_set(:@team_ui_cap_rejected, true) if text.include?("hasta tres")
+    end
+
+    def pbChoosePokemon(*args)
+      return super unless AnilCoopQA.scenario == "team-ui"
+      step = AnilCoopQA.instance_variable_get(:@team_ui_steps)&.shift
+      raise "QA team choices exhausted" unless step
+      AnilCoopQA.instance_variable_set(:@team_ui_action, step[1])
+      AnilCoopQA.instance_variable_set(:@team_ui_slot, step[0])
+      visible = (0...max_party_size).count { |i| @sprites["coop_order#{i}"].visible }
+      if visible == 3 && !AnilCoopQA.instance_variable_get(:@team_ui_captured)
+        bitmap = Graphics.snap_to_bitmap
+        bitmap.save_to_png(File.join(AnilCoopDev::PROFILE, "qa-team-ui.png"))
+        bitmap.dispose
+        AnilCoopQA.instance_variable_set(:@team_ui_captured, true)
+      end
+      step[0]
+    end
+
+    def pbShowCommands(help, commands, index = 0)
+      return super unless AnilCoopQA.scenario == "team-ui"
+      slot = AnilCoopQA.instance_variable_get(:@team_ui_slot)
+      if [3, 5].include?(slot)
+        raise "QA ineligible Pokémon offered" if commands.any? { |command| command.start_with?("Agregar") }
+      end
+      action = AnilCoopQA.instance_variable_get(:@team_ui_action)
+      selected = commands.index { |command| command.start_with?(action) }
+      raise "QA missing team action #{action}" unless selected
+      selected
+    end
+
+    def pbSummary(slot, *args)
+      return super unless AnilCoopQA.scenario == "team-ui"
+      summary = PokemonSummary_Scene.new
+      summary.pbStartScene(@party, slot)
+      5.times { Graphics.update; summary.pbUpdate }
+      bitmap = Graphics.snap_to_bitmap
+      bitmap.save_to_png(File.join(AnilCoopDev::PROFILE, "qa-team-summary.png"))
+      bitmap.dispose
+      summary.pbEndScene
+    end
   end
 
   # Essentials' own nonvisual scene, with only rendering-only DBK callbacks added.
@@ -632,6 +735,7 @@ module AnilCoopQA
 end
 
 AnilCoopBattle.prepend(AnilCoopQA::Orders)
+AnilCoopTeamScene.prepend(AnilCoopQA::TeamSceneBot)
 AnilCoop.singleton_class.prepend(AnilCoopQA::Fixtures)
 AnilCoop.singleton_class.prepend(AnilCoopQA::EventDriver)
 Object.prepend(AnilCoopQA::EventMessages)

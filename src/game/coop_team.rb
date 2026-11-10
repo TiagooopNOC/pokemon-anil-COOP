@@ -12,8 +12,12 @@ module AnilCoop
   def self.battle_prototype; personal_team? ? "personal2v2-v1" : "qa2v2-v1"; end
   def self.pokemon_key(p); "#{p.owner.id}:#{p.personalID}"; end
 
+  def self.team_eligible?(p)
+    p && p.able? && !p.egg? && !p.shadowPokemon? && !p.fused
+  end
+
   def self.team_snapshot(p, slot)
-    raise "Pokémon no utilizable" unless p.able? && !p.egg? && !p.shadowPokemon? && !p.fused
+    raise "Pokémon no utilizable" unless team_eligible?(p)
     {
       "key" => pokemon_key(p), "slot" => slot, "species" => p.species.to_s,
       "name" => p.name, "level" => p.level, "exp" => p.exp, "form" => p.form,
@@ -93,29 +97,115 @@ module AnilCoop
   end
 
   def self.choose_team(event)
-    chosen = []
+    AnilCoopTeamSelection.new(event).run
+  end
+end
+
+# Añil's real party scene draws the icons, names, levels, HP and status. The
+# numbered badges sit over its panels, so annotations never hide HP or status.
+class AnilCoopTeamScene < PokemonParty_Scene
+  def pbStartScene(*args)
+    super
+    max_party_size.times do |i|
+      panel = @sprites["pokemon#{i}"]
+      badge = BitmapSprite.new(22, 20, @viewport)
+      badge.x = panel.x + 48
+      badge.y = panel.y + 2
+      badge.z = panel.z + 6
+      badge.visible = false
+      @sprites["coop_order#{i}"] = badge
+    end
+  end
+
+  def coop_show_order(chosen)
+    max_party_size.times do |i|
+      badge = @sprites["coop_order#{i}"]
+      order = chosen.index(i)
+      badge.visible = !order.nil?
+      next unless order
+      bitmap = badge.bitmap
+      bitmap.clear
+      bitmap.fill_rect(0, 0, 22, 20, Color.new(40, 40, 40))
+      bitmap.fill_rect(2, 2, 18, 16, Color.new(240, 200, 72))
+      pbSetSmallFont(bitmap)
+      pbDrawTextPositions(bitmap, [[(order + 1).to_s, 11, -2, :center,
+                                    Color.new(24, 24, 24), Color.new(248, 248, 248)]])
+    end
+  end
+
+end
+
+class AnilCoopTeamSelection
+  def initialize(event)
+    @event = event
+  end
+
+  def run
+    chosen = previous_selection
+    scene = AnilCoopTeamScene.new
+    AnilCoop.instance_variable_set(:@team_menu_active, true)
+    scene.pbStartScene($player.party, "Elegí de 1 a 3 Pokémon en orden.", nil, true)
+    scene.coop_show_order(chosen)
     loop do
-      labels = $player.party.each_with_index.map do |p, i|
-        order = chosen.index(i)
-        "#{order ? "#{order + 1}. " : ""}#{p.name} Nv.#{p.level} PS #{p.hp}/#{p.totalhp}"
-      end
-      choice = pbMessage("Elegí 1–3 Pokémon en orden. Volvé a elegir uno para quitarlo.",
-                         labels + ["Confirmar equipo", "Cancelar"], -1) { battle_tick }
-      return false if choice < 0 || choice == labels.length + 1
-      if choice == labels.length
+      scene.pbSetHelpText("Equipo #{chosen.length}/3. Elegí o confirmá.")
+      slot = scene.pbChoosePokemon
+      return false if slot < 0
+      if slot == max_party_size
+        if chosen.empty?
+          scene.pbDisplay("Elegí al menos un Pokémon.")
+          next
+        end
         begin
-          trainer_send("trainer_team", event, team: select_team(chosen), trainer: trainer_snapshot)
+          team = AnilCoop.select_team(chosen)
+          AnilCoop.trainer_send("trainer_team", @event, team: team, trainer: AnilCoop.trainer_snapshot)
           return true
         rescue StandardError => e
-          pbMessage(e.message) { battle_tick }
+          scene.pbDisplay(e.message)
+          next
         end
-      elsif chosen.include?(choice)
-        chosen.delete(choice)
-      elsif chosen.length < 3 && $player.party[choice]&.able? && !$player.party[choice].egg?
-        chosen << choice
-      else
-        pbMessage("Elegí hasta tres Pokémon utilizables.") { battle_tick }
       end
+      next if slot >= $player.party.length
+      pokemon = $player.party[slot]
+      order = chosen.index(slot)
+      commands = []
+      commands << "Agregar al equipo cooperativo" if !order && AnilCoop.team_eligible?(pokemon)
+      commands << "Quitar del equipo cooperativo" if order
+      commands << "Subir en el orden" if order && order > 0
+      commands << "Bajar en el orden" if order && order < chosen.length - 1
+      commands << "Datos"
+      commands << "Cancelar"
+      choice = scene.pbShowCommands("¿Qué hacer con #{pokemon.name}?", commands)
+      next if choice < 0
+      case commands[choice]
+      when "Agregar al equipo cooperativo"
+        if chosen.length >= 3
+          scene.pbDisplay("El equipo cooperativo admite hasta tres Pokémon.")
+        else
+          chosen << slot
+        end
+      when "Quitar del equipo cooperativo"
+        chosen.delete(slot)
+      when "Subir en el orden"
+        chosen[order - 1], chosen[order] = chosen[order], chosen[order - 1]
+      when "Bajar en el orden"
+        chosen[order + 1], chosen[order] = chosen[order], chosen[order + 1]
+      when "Datos"
+        scene.pbSummary(slot)
+      end
+      scene.coop_show_order(chosen)
     end
+  ensure
+    AnilCoop.instance_variable_set(:@team_menu_active, false)
+    scene&.pbEndScene if scene&.instance_variable_get(:@sprites)
+  end
+
+  private
+
+  def previous_selection
+    Array(AnilCoop.instance_variable_get(:@selected_team)).filter_map do |snapshot|
+      slot = snapshot["slot"]
+      pokemon = $player.party[slot] if slot.is_a?(Integer)
+      slot if AnilCoop.team_eligible?(pokemon) && AnilCoop.pokemon_key(pokemon) == snapshot["key"]
+    end.uniq.first(3)
   end
 end
