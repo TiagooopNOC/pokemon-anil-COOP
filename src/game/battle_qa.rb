@@ -3,6 +3,9 @@
 module AnilCoopQA
   def self.scenario; ENV["ANIL_COOP_QA_SCENARIO"] || "basic"; end
   def self.story_loss?; scenario == "story-gary" && ENV["ANIL_COOP_QA_GARY_RESULT"] == "loss"; end
+  def self.story_brock?; scenario == "story-brock"; end
+  def self.story_case?; scenario == "story-gary" || story_brock?; end
+  def self.story_defeat?; story_loss? || (story_brock? && ENV["ANIL_COOP_QA_STORY_RESULT"] == "loss"); end
   def self.story_variant
     variant = Integer(ENV.fetch("ANIL_COOP_QA_GARY_VARIANT", "1"))
     raise "QA Gary variant must be 1..3" unless (1..3).include?(variant)
@@ -26,12 +29,29 @@ module AnilCoopQA
     save_data = SaveData.get_data_from_file(path) # no conversion/write-back
     SaveData.load_bootup_values(save_data)
     Game.load(save_data)
-    if scenario == "story-gary"
-      $map_factory.setup(29) # The actual Oak-lab map, only in this QA process.
-      $game_player.moveto(9, 14)
-      $game_variables[56] = story_variant - 1 # Original starter-dependent branch, in RAM only.
-      if story_loss?
-        # Only the QA in-memory party changes; Gary's original team and save stay intact.
+    if story_case?
+      if story_brock?
+        $map_factory.setup(42) # Original Pewter Gym event, in RAM only.
+        gym_leader = $game_map.events.fetch(16)
+        $game_player.moveto(gym_leader.x, gym_leader.y + 1)
+        $game_switches[666] = false
+        $game_switches[64] = true # Normal Brock team (version 0).
+        $player.badges[0] = false
+        $game_switches[184] = false
+        $game_switches[LevelCapsEX::LEVEL_CAP_BYPASS_SWITCH] = true unless story_defeat?
+        $player.party.each do |pkmn|
+          pkmn.level = 35
+          pkmn.moves = [Pokemon::Move.new(:WATERGUN)]
+          pkmn.calc_stats
+          pkmn.heal
+        end unless story_defeat?
+      else
+        $map_factory.setup(29) # The actual Oak-lab map, only in this QA process.
+        $game_player.moveto(9, 14)
+        $game_variables[56] = story_variant - 1 # Original starter-dependent branch, in RAM only.
+      end
+      if story_defeat?
+        # Only the QA in-memory party changes; the foe and save stay intact.
         $player.party.each do |pkmn|
           pkmn.hp = 1
           pkmn.moves = [Pokemon::Move.new(:SPLASH)]
@@ -63,12 +83,14 @@ module AnilCoopQA
       peers = AnilCoop.instance_variable_get(:@peers)
       AnilCoop.connected? && peers.length == 1 && peers.values.all? { |p| p["position"].is_a?(Hash) }
     end
-    AnilCoop.qa_trainer unless scenario == "story-gary"
-    event = $game_map.events.fetch(scenario == "story-gary" ? 3 : 9000)
+    AnilCoop.qa_trainer unless story_case?
+    event = $game_map.events.fetch(story_brock? ? 16 : (scenario == "story-gary" ? 3 : 9000))
     before_money = $player.money
     before_exp = $player.party.map(&:exp)
+    brock_items = [:TM39, :ROCKSMASHITEM, :ACapsula, :AECapsula]
+    brock_items_before = brock_items.to_h { |item| [item, $bag.quantity(item)] } if story_brock?
     visual = ENV["ANIL_COOP_QA_BOT"] == "visual"
-    if ["personal-event", "story-gary"].include?(scenario)
+    if ["personal-event", "story-gary", "story-brock"].include?(scenario)
       # Fix only the QA encounter initiator, so this victory scenario uses the
       # Normal profile's native Azul team rather than a random host race.
       if ENV["ANIL_COOP_NAME"] == "client04"
@@ -78,22 +100,35 @@ module AnilCoopQA
       remote_id = AnilCoop.instance_variable_get(:@peers).keys.first
       remote_before = AnilCoop.instance_variable_get(:@peers)[remote_id]["position"].dup
       interpreter = pbMapInterpreter
-      if scenario == "story-gary"
-        page = event.instance_variable_get(:@event).pages.fetch(1)
+      if story_case?
+        page = event.instance_variable_get(:@event).pages.fetch(story_brock? ? 0 : 1)
         event.instance_variable_set(:@page, page)
         event.instance_variable_set(:@list, page.list)
         event.instance_variable_set(:@trigger, page.trigger)
-        raise "Gary page unrecognized" unless AnilCoop.first_gary_event?(event, [:AZUL1, "Azul", story_variant])
-        setBattleRule("midbattleScript", :azul_combate_inicial)
-        # Execute the exact original conditional commands after the cutscene.
-        first, last = { 1 => [136, 143], 2 => [148, 160], 3 => [161, 174] }.fetch(story_variant)
+        if story_brock?
+          setBattleRule("midbattleScript", :lider1)
+          first, last = 17, 66 # Original battle branch and badge/reward commands.
+        else
+          raise "Gary page unrecognized" unless AnilCoop.first_gary_event?(event, [:AZUL1, "Azul", story_variant])
+          setBattleRule("midbattleScript", :azul_combate_inicial)
+          # Execute the exact original conditional commands after the cutscene.
+          first, last = { 1 => [136, 143], 2 => [148, 160], 3 => [161, 174] }.fetch(story_variant)
+        end
         interpreter.setup(page.list[first..last], event.id)
       else
         interpreter.setup(event.list, event.id)
       end
+      previous_command = nil
       while interpreter.running?
+        command = interpreter.instance_variable_get(:@list)&.[](interpreter.instance_variable_get(:@index))
+        command_key = [interpreter.instance_variable_get(:@index), command&.code]
+        if command_key != previous_command
+          AnilCoop.log("QA story command index=#{command_key[0]} code=#{command_key[1]}")
+          previous_command = command_key
+        end
         Graphics.update
         AnilCoop.tick($scene)
+        interpreter.instance_variable_set(:@message_waiting, false) if story_brock?
         interpreter.update
       end
       state = AnilCoop.instance_variable_get(:@last_battle_state)
@@ -140,6 +175,15 @@ module AnilCoopQA
     result[:story_variant] = story_variant if scenario == "story-gary"
     result[:story_defeat] = !AnilCoop.instance_variable_get(:@qa_story_return) &&
       $game_variables[1] == 2 if story_loss?
+    if story_brock?
+      result[:story_victory] = !!AnilCoop.instance_variable_get(:@qa_story_return) && $game_variables[1] == 1
+      result[:story_defeat] = !AnilCoop.instance_variable_get(:@qa_story_return) && $game_variables[1] == 2
+      result[:brock_badge] = !!$player.badges[0]
+      result[:brock_progress] = !!$game_switches[184]
+      result[:brock_item_deltas] = brock_items.to_h do |item|
+        [item, $bag.quantity(item) - brock_items_before[item]]
+      end
+    end
     result[:personal_money_delta] = $player.money - before_money
     result[:personal_exp_delta] = personal_exp if AnilCoop.personal_team?
     result[:connected_after] = AnilCoop.connected?
@@ -176,13 +220,23 @@ module AnilCoopQA
         $PokemonGlobal.anil_coop_receipts.key?(state["battle"])
       result[:trainer_completed] = AnilCoop.trainer_completed?(state["encounter_key"]) if state["encounter_key"]
       result[:reload_replay_safe] = AnilCoop.apply_personal_result(plan, party, decision, money: money || 0) == false
+      result[:brock_badge_reloaded] = !!$player.badges[0] if story_brock?
+      result[:brock_progress_reloaded] = !!$game_switches[184] if story_brock?
+      result[:brock_items_reloaded] = brock_items.all? do |item|
+        $bag.quantity(item) == brock_items_before[item] + result[:brock_item_deltas][item]
+      end if story_brock?
     end
     if result[:completed]
       delta = state["host"] == my_id ? 1 : 2
       $game_player.moveto($game_player.x, $game_player.y + delta)
       wait_until(12) do
         peer = AnilCoop.instance_variable_get(:@peers)[remote_id]
-        peer && peer.dig("position", "y") == remote_before["y"] + (3 - delta) &&
+        same_place = if story_brock? && result[:decision] == 2
+          peer && peer.dig("position", "map") == $game_map.map_id
+        else
+          peer && peer.dig("position", "y") == remote_before["y"] + (3 - delta)
+        end
+        same_place &&
           AnilCoop.instance_variable_get(:@sprites).key?(remote_id)
       end
       result[:peer_visible_after] = true
@@ -208,7 +262,7 @@ module AnilCoopQA
     result[:kind] = visual ? "rendered_engine_programmed_orders" : "engine_without_battle_rendering"
     result[:scenario] = scenario
     result[:menu_checks] = @menu_checks if @menu_checks
-    expected_decision = scenario == "loss" || story_loss? ? 2 : 1
+    expected_decision = scenario == "loss" || story_defeat? ? 2 : 1
     result[:pass] = result[:completed] && result[:decision] == expected_decision &&
                     result[:connected_after] && result[:save_unchanged] && result[:scene_map] && result[:peer_visible_after]
     result[:pass] &&= result[:map_rendered] if visual
@@ -230,12 +284,19 @@ module AnilCoopQA
       result[:pass] &&= result.dig(:observed, :poison) && result.dig(:observed, :item_consumed)
     elsif scenario == "automatic-target"
       result[:pass] &&= result.dig(:observed, :automatic_target_wire)
-    elsif ["personal-npc", "personal-event", "story-gary"].include?(scenario)
-      result[:pass] &&= (story_loss? ?
+    elsif ["personal-npc", "personal-event", "story-gary", "story-brock"].include?(scenario)
+      result[:pass] &&= (story_defeat? ?
         (!result[:trainer_completed] && result[:personal_money_delta] == 0 && result[:story_defeat]) :
         (result[:trainer_completed] && result[:personal_money_delta] > 0))
       result[:pass] &&= result[:event_victory] if scenario == "personal-event"
       result[:pass] &&= result[:story_victory] if scenario == "story-gary" && !story_loss?
+      result[:pass] &&= (story_defeat? ?
+        (!result[:brock_badge] && !result[:brock_progress] && !result[:brock_badge_reloaded] &&
+         result[:brock_item_deltas].values.all?(&:zero?)) :
+        (result[:story_victory] && result[:brock_badge] && result[:brock_progress] &&
+         result[:brock_badge_reloaded] && result[:brock_progress_reloaded] &&
+         result[:brock_item_deltas].values.all? { |qty| qty == 1 })) if story_brock?
+      result[:pass] &&= result[:brock_items_reloaded] if story_brock?
     elsif scenario == "personal-share"
       delta = result[:personal_exp_delta]
       result[:pass] &&= [1, 3, 5].all? { |i| delta[i] == 0 } && delta[2] > 0 && delta[4] > 0 &&
@@ -283,6 +344,7 @@ module AnilCoopQA
     def pbRevertBattlerEnd(*); end
     def pbCommonAnimationExists(*); false; end
     def pbSetFieldBackground; end
+    def pbStartContinuousWeather(*); end
     def pbUpdateHazardSprites; end
     def pbStartSpeech(*); end
     def pbForceEndSpeech; end
@@ -462,7 +524,7 @@ module AnilCoopQA
 
   module EventDriver
     def trainer_choice(key, text, commands, &block)
-      return super unless ["personal-event", "story-gary"].include?(AnilCoopQA.scenario)
+      return super unless ["personal-event", "story-gary", "story-brock"].include?(AnilCoopQA.scenario)
       super do
         state = instance_variable_get(:@trainer_states)[key]
         me = state["participants"].find { |p| p["id"] == instance_variable_get(:@id) }
@@ -481,18 +543,18 @@ module AnilCoopQA
     end
 
     def choose_team(event)
-      return super unless ["personal-event", "story-gary"].include?(AnilCoopQA.scenario)
+      return super unless ["personal-event", "story-gary", "story-brock"].include?(AnilCoopQA.scenario)
       trainer_send("trainer_team", event, team: select_team([0]), trainer: trainer_snapshot)
       true
     end
 
     def qa_coop_battle(state, scene: nil, visual: true)
-      if ["personal-event", "story-gary"].include?(AnilCoopQA.scenario)
+      if ["personal-event", "story-gary", "story-brock"].include?(AnilCoopQA.scenario)
         visual = ENV["ANIL_COOP_QA_BOT"] == "visual"
         scene = visual ? AnilCoopQA::VisualScene.new : AnilCoopQA::EngineScene.new
       end
       result = super(state, scene: scene, visual: visual)
-      instance_variable_set(:@qa_story_return, result) if AnilCoopQA.scenario == "story-gary"
+      instance_variable_set(:@qa_story_return, result) if AnilCoopQA.story_case?
       result
     end
   end
@@ -522,11 +584,59 @@ module AnilCoopQA
       pkmn
     end
   end
+
+  # Advance original post-battle event commands without OS key simulation.
+  # This skips message rendering only in the opt-in Brock QA process.
+  module EventMessages
+    def pbMessage(*args, &block)
+      return 0 if AnilCoopQA.story_brock?
+      super
+    end
+  end
+
+  # Event text is an input-driven scene. Skip it only in the opt-in automated
+  # Brock fixture so the original post-victory commands can be checked.
+  module BrockQAEventText
+    def execute_command
+      if AnilCoopQA.story_brock?
+        command = @list[@index]
+        AnilCoop.log("QA execute command index=#{@index} code=#{command&.code}")
+      end
+      super
+    end
+
+    def command_101
+      return true if AnilCoopQA.story_brock?
+      super
+    end
+
+    def pbReceiveItem(item, quantity = 1, *rest)
+      return $bag.add(item, quantity) if AnilCoopQA.story_brock?
+      super
+    end
+
+    def pbGetKeyItem(item, quantity = 1, *rest)
+      return true if AnilCoopQA.story_brock? # The next event command grants the item.
+      super
+    end
+  end
+
+  # The game's level-cap plugin caps GrowthRate.max_level even with its bypass
+  # switch set. Only the isolated Brock victory fixture needs stronger allies.
+  module BrockQALevels
+    def max_level
+      return Settings::MAXIMUM_LEVEL if AnilCoopQA.story_brock? && !AnilCoopQA.story_defeat?
+      super
+    end
+  end
 end
 
 AnilCoopBattle.prepend(AnilCoopQA::Orders)
 AnilCoop.singleton_class.prepend(AnilCoopQA::Fixtures)
 AnilCoop.singleton_class.prepend(AnilCoopQA::EventDriver)
+Object.prepend(AnilCoopQA::EventMessages)
+Interpreter.prepend(AnilCoopQA::BrockQAEventText)
+GameData::GrowthRate.singleton_class.prepend(AnilCoopQA::BrockQALevels)
 $anil_coop_qa_trace = TracePoint.new(:return) do |event|
   next unless event.method_id == :set_up_system && event.defined_class == Game.singleton_class
   $anil_coop_qa_trace.disable

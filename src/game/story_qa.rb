@@ -5,7 +5,7 @@ $anil_coop_story_trace = TracePoint.new(:return) do |event|
   $anil_coop_story_trace.disable
   result = { maps: [] }
   begin
-    [29, 5, 15].each do |map_id|
+    [29, 5, 6, 15, 42].each do |map_id|
       map = load_data(sprintf("Data/Map%03d.rxdata", map_id))
       chosen = map.events.values.filter_map do |ev|
         pages = ev.pages.each_with_index.filter_map do |page, index|
