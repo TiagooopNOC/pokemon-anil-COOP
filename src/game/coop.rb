@@ -424,6 +424,9 @@ module AnilCoop
     state = trainer_wait_for(event, "pending")
     if !state && forced
       log("trainer fallback #{trainer_call_label(event, trainer_args || [])} reason=#{@trainer_error || 'lobby_timeout'}")
+      if @trainer_error == "trainer_incompatible"
+        pbMessage("Este entrenador tiene una variante distinta para cada jugador.\nSe iniciará el combate individual.") { network }
+      end
       return yield
     end
     return false if !state
