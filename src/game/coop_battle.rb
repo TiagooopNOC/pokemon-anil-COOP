@@ -179,6 +179,13 @@ module AnilCoop
     scene ||= BattleCreationHelperMethods.create_battle_scene
     local_index = state["participants"].index { |p| p["id"] == @id } * 2
     battle = AnilCoopBattle.new(scene, p1, p2, trainers, [foe], local_index, state["seed"], team_sizes: team_sizes, personal: personal, enemy_origins: enemy_origins)
+    if state["enemy_trainer"]
+      inventory = state["enemy_trainer"].fetch("items", [])
+      raise BattleStopped, "unsupported trainer item" unless inventory.is_a?(Array) &&
+        inventory.length <= 4 && inventory.all? { |item| ["POTION", "SUPERPOTION"].include?(item) }
+      battle.items = [inventory.map(&:to_sym)]
+      battle.coop_allow_enemy_items! unless inventory.empty?
+    end
     if personal
       supplied.each_with_index do |data, i|
         p1[battle.coop_owned_indices[i]].expshare = originals[0].party[data["slot"]].expshare
@@ -233,6 +240,9 @@ module AnilCoop
 end
 
 class AnilCoopBattle < Battle
+  def coop_allow_enemy_items!; @coop_allow_enemy_items = true; end
+  def coop_allow_enemy_items?; !!@coop_allow_enemy_items; end
+
   # Gary's opening line is attached to "foe" in Añil. In a double battle DBK
   # dispatches that trigger for both foes, even when the second is a copy.
   def pbDeluxeTriggers(idx_battler, idx_target, *triggers)
@@ -369,7 +379,7 @@ class AnilCoopBattle < Battle
             @sides.map(&:effects), @turnCount, @decision,
             @field.weatherDuration, @field.terrainDuration,
             @priority.map { |entry| [entry[0].index, *entry[1..-1]] },
-            @coop_defeated.sort.map { |origin, foe| [origin, foe.participants.sort] }]
+            @coop_defeated.sort.map { |origin, foe| [origin, foe.participants.sort] }, @items]
     encoded = JSON.generate(AnilCoop.canonical_state(data))
     File.write(File.join(AnilCoopDev::PROFILE, "qa-2v2-state.json"), encoded)
     Digest::SHA256.hexdigest(encoded)
@@ -384,6 +394,10 @@ class AnilCoopBattle < Battle
       automatic = target_data.num_targets == 0 || target_data.id == :RandomNearFoe
       ["move", choice[1], automatic ? -1 : choice[3]]
     when :SwitchOut then ["switch", choice[1], -1]
+    when :UseItem
+      raise AnilCoop::BattleStopped, "unsupported trainer item" unless
+        [:POTION, :SUPERPOTION].include?(choice[1]) && choice[2].is_a?(Integer) && choice[3].nil?
+      ["item", choice[1].to_s, choice[2]]
     when :None then ["none", 0, -1]
     else raise AnilCoop::BattleStopped, "unsupported action #{choice[0]}"
     end
@@ -417,6 +431,19 @@ class AnilCoopBattle < Battle
       pbClearChoice(index)
       raise AnilCoop::BattleStopped, "illegal switch" unless pbCanSwitch?(index, slot)
       pbRegisterSwitch(index, slot)
+    when "item"
+      raise AnilCoop::BattleStopped, "illegal trainer item" unless
+        ["POTION", "SUPERPOTION"].include?(slot) && target.is_a?(Integer) &&
+        target.between?(0, pbParty(index).length - 1)
+      item = slot.to_sym
+      if @choices[index][0] == :UseItem
+        # The authoritative enemy AI already registered and consumed this item.
+        raise AnilCoop::BattleStopped, "trainer item mismatch" unless
+          @choices[index][1] == item && @choices[index][2] == target && @choices[index][3].nil?
+      else
+        raise AnilCoop::BattleStopped, "trainer item unavailable" unless pbGetOwnerItems(index).include?(item)
+        pbRegisterItem(index, item, target)
+      end
     when "none"
       raise AnilCoop::BattleStopped, "missing order" if pbCanShowCommands?(index)
     else
@@ -481,6 +508,24 @@ class AnilCoopBattle < Battle
     raise error
   end
 end
+
+# Essentials' enemy item AI is gated by internalBattle. Keep the co-op battle
+# external for Pokédex/reward safety, and expose that flag only while the AI
+# decides whether to use its own trainer medicine.
+module AnilCoopEnemyItemAI
+  def choose_item_to_use
+    battle = @battle
+    return super unless battle.is_a?(AnilCoopBattle) && battle.coop_allow_enemy_items?
+    previous = battle.internalBattle
+    begin
+      battle.internalBattle = true
+      super
+    ensure
+      battle.internalBattle = previous
+    end
+  end
+end
+Battle::AI.prepend(AnilCoopEnemyItemAI)
 
 class Battle::Scene
   # Native level-up stat windows otherwise wait for input without a scene update.

@@ -19,6 +19,12 @@ class TrainerSpeechTests(unittest.TestCase):
         self.assertFalse(validate_trainer(dict(trainer, lose_text="x" * 501)))
         self.assertFalse(validate_trainer(dict(trainer, win_text="bad\x00text")))
 
+    def test_trainer_medicine_is_bounded(self):
+        trainer = personal_trainer()
+        self.assertTrue(validate_trainer(dict(trainer, items=["POTION", "SUPERPOTION"])))
+        self.assertFalse(validate_trainer(dict(trainer, items=["FULLRESTORE"])))
+        self.assertFalse(validate_trainer(dict(trainer, items=["POTION"] * 5)))
+
 
 def personal_pokemon(slot=0):
     return dict(key=f"100:{1000 + slot}", slot=slot, species="BULBASAUR", name="Bulbasaur",
@@ -64,6 +70,16 @@ class BattleBarrierTests(unittest.TestCase):
         self.assertEqual(packet["commands"], [["move", 0, 1], ["move", 1, 3]])
         self.assertEqual(self.step("host", "enemy", [["move", 0, 0], ["move", 1, 2]]), (None, None))
         self.assertIsNotNone(self.step("guest", "enemy")[1])
+
+    def test_enemy_medicine_order_is_replayed_only_after_both_acknowledge(self):
+        self.setup_battle()
+        self.step("host", "turn", ["move", 0, 1])
+        self.step("guest", "turn", ["move", 0, 1])
+        order = [["item", "SUPERPOTION", 0], ["move", 0, 2]]
+        self.assertEqual(self.step("host", "enemy", order), (None, None))
+        error, packet = self.step("guest", "enemy")
+        self.assertIsNone(error)
+        self.assertEqual(packet["commands"][0], order)
 
     def test_forged_owner_stale_duplicate_and_bad_commands(self):
         self.setup_battle()
