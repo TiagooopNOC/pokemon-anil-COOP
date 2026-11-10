@@ -422,7 +422,10 @@ module AnilCoop
     end
     trainer_send("trainer_wait", event, extras)
     state = trainer_wait_for(event, "pending")
-    return yield if !state && forced
+    if !state && forced
+      log("trainer fallback #{trainer_call_label(event, trainer_args || [])} reason=#{@trainer_error || 'lobby_timeout'}")
+      return yield
+    end
     return false if !state
     loop do
       network
@@ -455,8 +458,9 @@ module AnilCoop
           begin
             send_trainer_foe(event, trainer_args)
           rescue StandardError => e
-            pbMessage(e.message) { network }
-            next
+            log("trainer fallback #{trainer_call_label(event, trainer_args)} reason=foe_unsupported:#{e.class}")
+            pbMessage("Cooperativo no disponible: #{e.message}\nSe iniciará el combate individual.") { network }
+            solo = true
           end
         end
         trainer_send("trainer_start", event, solo: solo)
@@ -572,12 +576,38 @@ end
 class << TrainerBattle
   alias_method :anil_coop_base_start, :start
   def start(*args)
-    return anil_coop_base_start(*args) unless ENV["ANIL_COOP_SESSION"] && AnilCoop.connected?
-    return anil_coop_base_start(*args) unless pbMapInterpreterRunning?
-    event = pbMapInterpreter.get_self
-    return anil_coop_base_start(*args) unless event
-    story = AnilCoop.first_gary_event?(event, args)
-    return anil_coop_base_start(*args) unless story || event.name[/trainer\(\d+\)/i]
+    context = AnilCoop.story_script_context
+    event = context && context[:interpreter].get_self
+    event ||= pbMapInterpreter.get_self if pbMapInterpreterRunning?
+    label = AnilCoop.trainer_call_label(event, args)
+    if !ENV["ANIL_COOP_SESSION"]
+      AnilCoop.log("trainer fallback #{label} reason=no_session") if ENV["ANIL_COOP_MENU"] == "1"
+      return anil_coop_base_start(*args)
+    end
+    unless AnilCoop.connected?
+      deadline = Time.now.to_f + 2
+      until AnilCoop.connected? || Time.now.to_f >= deadline
+        AnilCoop.tick($scene)
+        Graphics.update
+      end
+    end
+    unless AnilCoop.connected?
+      AnilCoop.log("trainer fallback #{label} reason=transport_disconnected")
+      return anil_coop_base_start(*args)
+    end
+    unless event
+      AnilCoop.log("trainer fallback #{label} reason=event_missing")
+      return anil_coop_base_start(*args)
+    end
+    ordinary = !!event.name[/trainer\(\d+\)/i]
+    reason = ordinary ? nil : AnilCoop.story_trainer_compatible?(event, args)
+    if reason
+      AnilCoop.log("trainer fallback #{label} reason=#{reason}")
+      pbMessage("Este encuentro especial requiere combate individual.") if reason.start_with?("unsupported_rules")
+      return anil_coop_base_start(*args)
+    end
+    story = !ordinary
+    AnilCoop.log("trainer adapter #{label} kind=#{story ? 'story' : 'ordinary'}")
     AnilCoop.instance_variable_set(:@story_battle, story)
     AnilCoop.trainer_lobby(event, story || event.trigger == 2, args, story: story) { anil_coop_base_start(*args) }
   ensure
