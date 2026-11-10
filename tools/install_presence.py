@@ -46,6 +46,7 @@ def main():
                 shutil.copy2(battle_target, previous)
         shutil.copy2(ROOT / "src/game/coop_battle.rb", battle_target)
         shutil.copy2(ROOT / "src/game/coop_trainers.rb", game / "CoopDev/coop_trainers.rb")
+        shutil.copy2(ROOT / "src/game/coop_challenge.rb", game / "CoopDev/coop_challenge.rb")
         shutil.copy2(ROOT / "src/game/coop_result.rb", game / "CoopDev/coop_result.rb")
         shutil.copy2(ROOT / "src/game/coop_team.rb", game / "CoopDev/coop_team.rb")
         shutil.copy2(ROOT / "src/game/coop_menus.rb", game / "CoopDev/coop_menus.rb")
@@ -53,6 +54,7 @@ def main():
         shutil.copy2(ROOT / "src/game/menu_qa.rb", game / "CoopDev/menu_qa.rb")
         shutil.copy2(ROOT / "src/game/presence_qa.rb", game / "CoopDev/presence_qa.rb")
         shutil.copy2(ROOT / "src/game/story_qa.rb", game / "CoopDev/story_qa.rb")
+        shutil.copy2(ROOT / "src/game/challenge_qa.rb", game / "CoopDev/challenge_qa.rb")
         shutil.copy2(ROOT / "src/game/battle_qa.rb", game / "CoopDev/battle_qa.rb")
         shutil.copy2(loader, game / "CoopDev/loader.rb")
         # Añil does not call rgss_main, so mkxp's postloadScript never runs.

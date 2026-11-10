@@ -286,6 +286,7 @@ module AnilCoop
     if ENV["ANIL_COOP_QA_RANDOMLOCKE"] == "1" && !RandomizedChallenge.enabled?
       RandomizedChallenge.enable
       $PokemonGlobal.challenge_rules = [:PERMAFAINT, :ONE_CAPTURE]
+      $PokemonGlobal.challenge_encs = {}
       ChallengeModes.begin_challenge
     end
     saved = Game.save("Partida 1")

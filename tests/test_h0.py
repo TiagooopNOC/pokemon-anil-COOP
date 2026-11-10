@@ -233,6 +233,7 @@ class WorkspaceSafety(unittest.TestCase):
     def test_alpha_package_contains_launchers_and_reviewed_vendor_only(self):
         for name in ("README.md", ".gitignore", ".gitattributes", "Jugar-Coop.cmd", "jugar-coop.sh",
                      "vendor/gameslot/gameslot.py", "vendor/gameslot/LICENSE", "vendor/gameslot/README.md",
+                     "src/game/coop_challenge.rb",
                      "vendor/private-secret.json", "local/workspace.json", "local/Partida 1.rxdata"):
             target = self.repo / name
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -242,6 +243,7 @@ class WorkspaceSafety(unittest.TestCase):
             names = z.namelist()
             self.assertIn("Jugar-Coop.cmd", names)
             self.assertIn("vendor/gameslot/LICENSE", names)
+            self.assertIn("src/game/coop_challenge.rb", names)
             self.assertNotIn("vendor/private-secret.json", names)
             self.assertFalse(any(n.startswith("local/") for n in names))
             self.assertEqual(z.getinfo("jugar-coop.sh").external_attr >> 16, 0o755)

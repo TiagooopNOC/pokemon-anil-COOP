@@ -93,6 +93,7 @@ def main() -> int:
                 cfg.get("dataPathApp") != workspace[client["client"]]["profile_id"] or
                 not (Path(client["cwd"]) / "CoopDev/isolate.rb").is_file() or
                 not (Path(client["cwd"]) / "CoopDev/coop.rb").is_file() or
+                not (Path(client["cwd"]) / "CoopDev/coop_challenge.rb").is_file() or
                 not (Path(client["cwd"]) / "CoopDev/loader.rb").is_file() or
                 (profile / "profile-id.txt").read_text().strip() != workspace[client["client"]]["profile_id"]):
             raise SafetyError("Client isolation preflight failed")
