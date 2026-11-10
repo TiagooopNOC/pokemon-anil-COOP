@@ -97,10 +97,24 @@ module AnilCoopPlayerSteps
 end
 Game_Player.prepend(AnilCoopPlayerSteps)
 
+if defined?(Game_FollowingPkmn)
+  module AnilCoopFollowerSteps
+    def move_generic(dir, turn_enabled = true)
+      old_x, old_y = @x, @y
+      super
+      if (@x - old_x).abs + (@y - old_y).abs == 1
+        AnilCoop.record_follower_step(self, dir)
+      end
+    end
+  end
+  Game_FollowingPkmn.prepend(AnilCoopFollowerSteps)
+end
+
 module AnilCoop
   @peers = {}
   @sprites = {}
   @labels = {}
+  @follower_sprites = {}
   @trainer_states = {}
   @sequence = 0
   @buffer = +""
@@ -134,6 +148,56 @@ module AnilCoop
     @steps_overflow = false
     @last_sent_position = [map, x, y]
     [warp ? [] : steps, !!warp]
+  end
+
+  def self.record_follower_step(event, dir)
+    return unless connected? && [2, 4, 6, 8].include?(dir)
+    return unless @follower_event.equal?(event)
+    @pending_follower_steps ||= []
+    if @pending_follower_steps.length < 24
+      @pending_follower_steps << dir
+    else
+      @follower_steps_overflow = true
+    end
+  end
+
+  def self.follower_position(sequence)
+    unless defined?(FollowingPkmn) && FollowingPkmn.can_check? && FollowingPkmn.active?
+      @follower_event = nil
+      @last_sent_follower = nil
+      @pending_follower_steps = []
+      return nil
+    end
+    event = FollowingPkmn.get_event
+    unless event && event.map.map_id == $game_map.map_id &&
+           !event.transparent &&
+           event.character_name.to_s.match?(/\AFollowers(?: shiny)?\/[[:alnum:]_ -]{1,80}\.png\z/) &&
+           event.x.between?(0, 9999) && event.y.between?(0, 9999) &&
+           [2, 4, 6, 8].include?(event.direction) && event.pattern.between?(0, 3) &&
+           event.move_speed.between?(1, 8) &&
+           event.character_hue.is_a?(Integer) && event.character_hue.between?(0, 360)
+      @follower_event = nil
+      @last_sent_follower = nil
+      @pending_follower_steps = []
+      return nil
+    end
+    map = event.map.map_id
+    steps = @pending_follower_steps || []
+    previous = @last_sent_follower
+    endpoint = previous && previous[0] == map && @follower_event.equal?(event) ? previous[1, 2] : nil
+    steps.each do |dir|
+      break unless endpoint
+      endpoint = [endpoint[0] + (dir == 6 ? 1 : dir == 4 ? -1 : 0),
+                  endpoint[1] + (dir == 2 ? 1 : dir == 8 ? -1 : 0)]
+    end
+    warp = @follower_steps_overflow || endpoint != [event.x, event.y]
+    @follower_event = event
+    @last_sent_follower = [map, event.x, event.y]
+    @pending_follower_steps = []
+    @follower_steps_overflow = false
+    { map: map, x: event.x, y: event.y, direction: event.direction,
+      pattern: event.pattern, speed: event.move_speed, sprite: event.character_name,
+      hue: event.character_hue, seq: sequence, steps: warp ? [] : steps, warp: !!warp }
   end
 
   def self.log(message)
@@ -239,6 +303,10 @@ module AnilCoop
     @pending_steps = []
     @last_sent_position = nil
     @steps_overflow = false
+    @follower_event = nil
+    @last_sent_follower = nil
+    @pending_follower_steps = []
+    @follower_steps_overflow = false
     @trainer_states.clear
     clear_sprites
     log("disconnected")
@@ -249,6 +317,35 @@ module AnilCoop
     @sprites.clear
     @labels.each_value { |entry| entry[:sprite].dispose unless entry[:sprite].disposed? }
     @labels.clear
+    @follower_sprites.each_value { |s| s.dispose unless s.disposed? }
+    @follower_sprites.clear
+  end
+
+  def self.remove_follower_sprite(id)
+    sprite = @follower_sprites.delete(id)
+    sprite.dispose if sprite && !sprite.disposed?
+  end
+
+  def self.update_follower_sprite(id, position)
+    unless position.is_a?(Hash) && position["map"] == @map && !position["sprite"].to_s.empty?
+      remove_follower_sprite(id)
+      return
+    end
+    sprite = @follower_sprites[id]
+    unless sprite
+      character = AnilCoopRemoteCharacter.new($game_map)
+      character.through = true
+      character.character_name = position["sprite"]
+      character.character_hue = position["hue"]
+      character.follow_network(position)
+      sprite = Sprite_Character.new(Spriteset_Map.viewport, character)
+      @follower_sprites[id] = sprite
+    end
+    character = sprite.character
+    character.character_name = position["sprite"]
+    character.character_hue = position["hue"]
+    character.follow_network(position)
+    sprite.update
   end
 
   def self.remove_label(id)
@@ -301,6 +398,7 @@ module AnilCoop
         sprite.dispose unless sprite.disposed?
       end
       remove_label(message["id"])
+      remove_follower_sprite(message["id"])
       log("peer left #{message["id"]}")
     when "trainer_state"
       @trainer_states[[message["map"], message["event"]]] = message
@@ -539,7 +637,8 @@ module AnilCoop
         queue(type: "position", map: $game_map.map_id, x: $game_player.x,
               y: $game_player.y, direction: $game_player.direction,
               pattern: $game_player.pattern, speed: $game_player.move_speed,
-              sprite: sprite_name, seq: @sequence, steps: steps, warp: warp)
+              sprite: sprite_name, seq: @sequence, steps: steps, warp: warp,
+              follower: follower_position(@sequence))
       end
     end
     if @map != $game_map.map_id
@@ -553,6 +652,7 @@ module AnilCoop
           sprite.dispose unless sprite.disposed?
         end
         remove_label(id)
+        remove_follower_sprite(id)
         next
       end
       sprite = @sprites[id]
@@ -570,6 +670,7 @@ module AnilCoop
       character.follow_network(pos)
       sprite.update
       update_label(id, peer["name"], sprite)
+      update_follower_sprite(id, pos["follower"])
     end
   rescue StandardError => e
     now = Time.now.to_f

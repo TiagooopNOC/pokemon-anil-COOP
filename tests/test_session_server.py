@@ -106,6 +106,32 @@ class SessionServerTests(unittest.TestCase):
         self.assertEqual(self.exchange(sender, dict(turn, seq=2, steps=[6, 3, 2]))["reason"], "invalid_position")
         self.assertEqual(self.exchange(sender, dict(turn, seq=2, steps=[6], warp=True))["reason"], "invalid_position")
 
+    def test_follower_presence_and_ordered_steps(self):
+        sender, observer = self.client(), self.client()
+        self.exchange(sender, {"type": "create", "session": "FOLL01", "name": "one"})
+        self.exchange(observer, {"type": "join", "session": "FOLL01", "name": "two"})
+        self.receive(sender)
+        base = {"type": "position", "map": 1, "x": 10, "y": 10,
+                "direction": 6, "pattern": 0, "speed": 4, "seq": 0,
+                "sprite": "trainer", "steps": [], "warp": True}
+        follower = {"map": 1, "x": 9, "y": 10, "direction": 6, "pattern": 0,
+                    "speed": 4, "seq": 0, "sprite": "Followers/BULBASAUR.png",
+                    "hue": 0, "steps": [], "warp": True}
+        sender.sendall((json.dumps(dict(base, follower=follower)) + "\n").encode())
+        self.assertEqual(self.receive(observer)["player"]["position"]["follower"]["sprite"],
+                         "Followers/BULBASAUR.png")
+        moved = dict(follower, x=10, seq=1, steps=[6], warp=False)
+        sender.sendall((json.dumps(dict(base, x=11, seq=1, steps=[6], warp=False,
+                                        follower=moved)) + "\n").encode())
+        self.assertEqual(self.receive(observer)["player"]["position"]["follower"]["steps"], [6])
+        bad = dict(base, seq=2, x=11, steps=[], warp=False)
+        self.assertEqual(self.exchange(sender, dict(bad, follower=dict(moved, seq=2, x=12, steps=[2])))["reason"],
+                         "invalid_follower")
+        self.assertEqual(self.exchange(sender, dict(bad, follower=dict(moved, seq=2,
+                         sprite="../Game.exe", steps=[], warp=True)))["reason"], "invalid_follower")
+        sender.sendall((json.dumps(dict(bad, follower=None)) + "\n").encode())
+        self.assertIsNone(self.receive(observer)["player"]["position"]["follower"])
+
     def test_auth_and_private_binding(self):
         self.assertTrue(private_bind("127.0.0.1"))
         self.assertTrue(private_bind("192.168.1.10"))

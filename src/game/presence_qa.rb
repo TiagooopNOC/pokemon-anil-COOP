@@ -1,6 +1,116 @@
 # Opt-in native-engine check of ordered remote steps. No saves or OS input.
 require "digest"
 module AnilCoopPresenceQA
+  def self.followers_run
+    save = File.join(AnilCoopDev::SAVE_DIR, "Partida 1.rxdata")
+    before = Digest::SHA256.file(save).hexdigest
+    data = SaveData.get_data_from_file(save)
+    SaveData.load_bootup_values(data)
+    Game.load(data)
+    $game_player.refresh
+    $scene.createSpritesets
+    Graphics.transition(0)
+    sender = ENV["ANIL_COOP_NAME"] == "client03"
+    deadline = System.uptime + 35
+    loop do
+      Graphics.update
+      AnilCoop.tick($scene)
+      break if AnilCoop.connected? && AnilCoop.instance_variable_get(:@peers).length == 1
+      raise "follower peer timeout" if System.uptime > deadline
+    end
+    if sender
+      $player.party << Pokemon.new(:BULBASAUR, 7) if !$player.first_able_pokemon
+      event = RPG::Event.new($game_player.x - 1, $game_player.y)
+      event.id = 9001
+      event.name = "FollowingPkmn Co-op QA"
+      game_event = Game_Event.new($game_map.map_id, event, $game_map)
+      $game_map.events[9001] = game_event
+      FollowingPkmn.start_following(9001, false)
+      follower = FollowingPkmn.get_event
+      raise "native follower missing" unless follower && !follower.character_name.to_s.empty?
+      follower.through = true
+      $game_player.through = true
+      initial_follower = [follower.x, follower.y]
+      start = System.uptime
+      route = [[0.35, 6], [0.65, 6], [0.95, 2], [1.25, 4], [1.55, 8]]
+      next_step = 0
+      while System.uptime - start < 2.1
+        Graphics.update
+        follower.update
+        $game_player.update
+        if next_step < route.length && System.uptime - start >= route[next_step][0]
+          $game_player.move_generic(route[next_step][1])
+          $game_temp.followers.move_followers
+          next_step += 1
+        end
+        AnilCoop.tick($scene)
+      end
+      raise "follower route incomplete" unless next_step == route.length
+      raise "native follower did not follow" if [follower.x, follower.y] == initial_follower
+      FollowingPkmn.stop_following
+      deadline = System.uptime + 2
+      while System.uptime < deadline
+        Graphics.update
+        AnilCoop.tick($scene)
+      end
+      sprite_name = follower.character_name
+      $game_map.events.delete(9001)
+    else
+      seen = false
+      movement = false
+      partial = false
+      ordered_steps = false
+      previous = nil
+      hidden = false
+      deadline = System.uptime + 9
+      while System.uptime < deadline
+        Graphics.update
+        AnilCoop.tick($scene)
+        remote = AnilCoop.instance_variable_get(:@peers).values.first
+        sent_steps = remote && remote["position"] && remote["position"]["follower"] &&
+                     remote["position"]["follower"]["steps"]
+        ordered_steps ||= sent_steps.is_a?(Array) && !sent_steps.empty?
+        sprites = AnilCoop.instance_variable_get(:@follower_sprites)
+        sprite = sprites.values.first
+        if sprite && !sprite.disposed?
+          seen = true
+          point = [sprite.character.real_x, sprite.character.real_y]
+          if previous
+            dx, dy = (point[0] - previous[0]).abs, (point[1] - previous[1]).abs
+            raise "diagonal follower frame" if dx > 0.001 && dy > 0.001
+            raise "follower teleported in frame" if dx > Game_Map::REAL_RES_X * 0.95 ||
+                                                 dy > Game_Map::REAL_RES_Y * 0.95
+            movement ||= dx > 0.001 || dy > 0.001
+            partial ||= (dx > 0.001 && dx < Game_Map::REAL_RES_X * 0.5) ||
+                        (dy > 0.001 && dy < Game_Map::REAL_RES_Y * 0.5)
+          end
+          previous = point
+          sprite_name = sprite.character.character_name
+          unless @follower_screenshot
+            bitmap = Graphics.snap_to_bitmap
+            bitmap.save_to_png(File.join(AnilCoopDev::PROFILE, "qa-peer-follower.png"))
+            bitmap.dispose
+            @follower_screenshot = true
+          end
+        elsif seen
+          hidden = true
+          break
+        end
+      end
+      raise "remote follower not seen" unless seen
+      raise "remote follower did not move" unless movement
+      raise "remote follower did not interpolate" unless partial
+      raise "native follower steps not sent" unless ordered_steps
+      raise "remote follower not removed" unless hidden
+      AnilCoop.clear_sprites
+      raise "follower survived sprite reset" unless AnilCoop.instance_variable_get(:@follower_sprites).empty?
+    end
+    raise "save changed" unless Digest::SHA256.file(save).hexdigest == before
+    { pass: true, sender: sender, sprite: sprite_name, moved: sender ? true : movement,
+      hidden: sender ? true : hidden, ordered_steps: sender ? true : ordered_steps,
+      save_unchanged: true }
+  end
+
   def self.labels_run
     save = File.join(AnilCoopDev::SAVE_DIR, "Partida 1.rxdata")
     before = Digest::SHA256.file(save).hexdigest
@@ -152,7 +262,9 @@ $anil_coop_presence_trace = TracePoint.new(:return) do |event|
   $anil_coop_presence_trace.disable
   result = { pass: false }
   begin
-    if ENV["ANIL_COOP_PRESENCE_QA"] == "labels"
+    if ENV["ANIL_COOP_PRESENCE_QA"] == "followers"
+      result = AnilCoopPresenceQA.followers_run
+    elsif ENV["ANIL_COOP_PRESENCE_QA"] == "labels"
       result = AnilCoopPresenceQA.labels_run
     elsif ENV["ANIL_COOP_PRESENCE_QA"] == "network"
       result = AnilCoopPresenceQA.network_run

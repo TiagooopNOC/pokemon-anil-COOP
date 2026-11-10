@@ -23,6 +23,7 @@ MAX_PLAYERS = 4
 VALID_CODE = re.compile(r"[A-Z0-9]{6,12}\Z")
 VALID_NAME = re.compile(r"[\w -]{1,24}\Z", re.UNICODE)
 VALID_SPRITE = re.compile(r"[\w -]{1,80}\Z", re.UNICODE)
+VALID_FOLLOWER_SPRITE = re.compile(r"Followers(?: shiny)?/[\w -]{1,80}\.png\Z", re.UNICODE)
 LOCAL_SECRET = "local-development-only"
 
 
@@ -148,6 +149,40 @@ class State:
                             endpoint_y += (direction == 2) - (direction == 8)
                         if (endpoint_x, endpoint_y) != (message["x"], message["y"]):
                             return {"type": "error", "reason": "invalid_position"}, identity
+                follower = message.get("follower")
+                if follower is not None:
+                    follower_keys = ("map", "x", "y", "direction", "pattern", "seq", "hue")
+                    if (not isinstance(follower, dict) or
+                            any(type(follower.get(k)) is not int for k in follower_keys) or
+                            follower["map"] != message["map"] or
+                            not 0 <= follower["x"] <= 9999 or not 0 <= follower["y"] <= 9999 or
+                            follower["direction"] not in (2, 4, 6, 8) or
+                            not 0 <= follower["pattern"] <= 3 or
+                            follower["seq"] != message["seq"] or
+                            not 0 <= follower["hue"] <= 360 or
+                            not isinstance(follower.get("sprite"), str) or
+                            not VALID_FOLLOWER_SPRITE.fullmatch(follower["sprite"])):
+                        return {"type": "error", "reason": "invalid_follower"}, identity
+                    follower_speed = follower.get("speed")
+                    follower_steps = follower.get("steps")
+                    follower_warp = follower.get("warp")
+                    if (type(follower_speed) not in (int, float) or not math.isfinite(follower_speed) or
+                            not 1 <= follower_speed <= 8 or
+                            not isinstance(follower_steps, list) or len(follower_steps) > 24 or
+                            any(type(direction) is not int or direction not in (2, 4, 6, 8)
+                                for direction in follower_steps) or
+                            type(follower_warp) is not bool or (follower_warp and follower_steps)):
+                        return {"type": "error", "reason": "invalid_follower"}, identity
+                    previous = player["position"] and player["position"].get("follower")
+                    if not follower_warp:
+                        if not previous or previous["map"] != follower["map"]:
+                            return {"type": "error", "reason": "invalid_follower"}, identity
+                        endpoint_x, endpoint_y = previous["x"], previous["y"]
+                        for direction in follower_steps:
+                            endpoint_x += (direction == 6) - (direction == 4)
+                            endpoint_y += (direction == 2) - (direction == 8)
+                        if (endpoint_x, endpoint_y) != (follower["x"], follower["y"]):
+                            return {"type": "error", "reason": "invalid_follower"}, identity
                 player["seq"] = message["seq"]
                 player["position"] = {k: message[k] for k in keys if k != "seq"}
                 player["position"]["sprite"] = sprite
@@ -156,6 +191,7 @@ class State:
                 if steps is not None:
                     player["position"]["steps"] = steps
                     player["position"]["warp"] = warp
+                player["position"]["follower"] = follower
                 self.broadcast(room, {"type": "position", "player": self.public(player)}, except_sock=sock)
                 return None, identity
             if kind == "ping":
