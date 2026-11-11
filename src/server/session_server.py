@@ -15,8 +15,10 @@ import time
 
 if __package__:
     from .coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, DIGEST, validate_team, validate_trainer, validate_view_team
+    from .trade_preview import TradePreview
 else:
     from coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, DIGEST, validate_team, validate_trainer, validate_view_team
+    from trade_preview import TradePreview
 
 MAX_LINE = 32768  # Bounded personal-team snapshots; no binary game objects.
 MAX_PLAYERS = 4
@@ -25,6 +27,7 @@ VALID_NAME = re.compile(r"[\w -]{1,24}\Z", re.UNICODE)
 VALID_SPRITE = re.compile(r"[\w -]{1,80}\Z", re.UNICODE)
 VALID_FOLLOWER_SPRITE = re.compile(r"Followers(?: shiny)?/[\w -]{1,80}\.png\Z", re.UNICODE)
 VALID_VIEW_REQUEST = re.compile(r"[a-f0-9]{16}\Z")
+VALID_TRADE_ID = re.compile(r"[a-f0-9]{32}\Z")
 INVITE_KINDS = frozenset(("trade", "pvp"))
 FOLLOWER_KEYS = frozenset(("map", "x", "y", "direction", "pattern", "seq",
                            "hue", "speed", "sprite", "steps", "warp"))
@@ -68,7 +71,7 @@ class State:
                     if code in self.rooms:
                         return {"type": "error", "reason": "session_exists"}, None
                     self.rooms[code] = {"members": {}, "next_slot": 1, "trainers": {},
-                                        "view_requests": {}, "invites": {},
+                                        "view_requests": {}, "invites": {}, "trades": {},
                                         "host": None, "speed": 0}
                 room = self.rooms.get(code)
                 if not room:
@@ -116,6 +119,36 @@ class State:
                     continue
                 del room["invites"][invite_id]
                 self.invite_notify(room, invite_id, invite, "expired")
+            for trade_id, trade in list(room["trades"].items()):
+                if now - trade.updated > 300:
+                    self.trade_close(room, trade_id, "expired")
+            if kind.startswith("trade_"):
+                trade_id = message.get("trade")
+                if not isinstance(trade_id, str) or not VALID_TRADE_ID.fullmatch(trade_id):
+                    return {"type": "trade_error", "trade": "", "reason": "invalid_trade"}, identity
+                trade = room["trades"].get(trade_id)
+                if not trade or player_id not in trade.players:
+                    return {"type": "trade_error", "trade": trade_id, "reason": "unavailable"}, identity
+                if kind == "trade_offer":
+                    if message.keys() != {"type", "trade", "offer"} or not trade.offer(player_id, message["offer"]):
+                        return {"type": "trade_error", "trade": trade_id, "reason": "invalid_offer"}, identity
+                    self.trade_notify(room, trade)
+                    return None, identity
+                if kind == "trade_confirm":
+                    if message.keys() != {"type", "trade", "version"}:
+                        return {"type": "trade_error", "trade": trade_id, "reason": "invalid_confirm"}, identity
+                    result = trade.confirm(player_id, message["version"])
+                    if result is None:
+                        return {"type": "trade_error", "trade": trade_id, "reason": "stale_offer"}, identity
+                    if result:
+                        self.trade_close(room, trade_id, "preview_complete")
+                    else:
+                        self.trade_notify(room, trade)
+                    return None, identity
+                if kind == "trade_cancel" and message.keys() == {"type", "trade"}:
+                    self.trade_close(room, trade_id, "cancelled")
+                    return None, identity
+                return {"type": "trade_error", "trade": trade_id, "reason": "invalid_message"}, identity
             if kind.startswith("invite_"):
                 invite_id = message.get("request")
                 if not isinstance(invite_id, str) or not VALID_VIEW_REQUEST.fullmatch(invite_id):
@@ -129,6 +162,9 @@ class State:
                             not isinstance(invite_kind, str) or invite_kind not in INVITE_KINDS or not recipient or
                             recipient["sock"] is None or target == player_id or
                             invite_id in invites or len(invites) >= 8 or
+                            (invite_kind == "trade" and any(
+                                player_id in trade.players or target in trade.players
+                                for trade in room["trades"].values())) or
                             any((entry["from"], entry["to"], entry["kind"]) ==
                                 (player_id, target, invite_kind) for entry in invites.values())):
                         return {"type": "invite_state", "request": invite_id,
@@ -154,8 +190,17 @@ class State:
                         return {"type": "invite_state", "request": invite_id,
                                 "status": "invalid"}, identity
                     status = "accepted" if message["accept"] else "declined"
+                    if status == "accepted" and invite["kind"] == "trade":
+                        if any(invite["from"] in trade.players or invite["to"] in trade.players
+                               for trade in room["trades"].values()):
+                            status = "unavailable"
+                        else:
+                            trade = TradePreview((invite["from"], invite["to"]))
+                            room["trades"][trade.id] = trade
                     del invites[invite_id]
                     self.invite_notify(room, invite_id, invite, status)
+                    if status == "accepted" and invite["kind"] == "trade":
+                        self.trade_notify(room, trade)
                     return None, identity
                 if kind == "invite_cancel":
                     if message.keys() != {"type", "request"} or not invite or invite["from"] != player_id:
@@ -528,6 +573,20 @@ class State:
                 except OSError:
                     pass
 
+    def trade_notify(self, room, trade, phase="choosing"):
+        packet = trade.state(phase)
+        for player_id in trade.players:
+            player = room["members"].get(player_id)
+            if player and player["sock"]:
+                try:
+                    self.send_one(player["sock"], packet)
+                except OSError:
+                    pass
+
+    def trade_close(self, room, trade_id, phase):
+        trade = room["trades"].pop(trade_id)
+        self.trade_notify(room, trade, phase)
+
     @staticmethod
     def public(player):
         return {"id": player["id"], "slot": player["slot"], "name": player["name"],
@@ -558,6 +617,9 @@ class State:
                         continue
                     del room["invites"][invite_id]
                     self.invite_notify(room, invite_id, invite, "peer_left")
+                for trade_id, trade in list(room["trades"].items()):
+                    if player["id"] in trade.players:
+                        self.trade_close(room, trade_id, "peer_left")
                 for request_id, entry in list(room["view_requests"].items()):
                     if player["id"] not in (entry["from"], entry["to"]):
                         continue

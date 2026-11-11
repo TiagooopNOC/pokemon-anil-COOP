@@ -5,6 +5,7 @@ import unittest
 
 from src.server.session_server import Server, Handler, State, proof, private_bind
 from src.client.bridge import Bridge
+from tests.test_trade_preview import offer
 import src.server.session_server as module
 
 
@@ -137,6 +138,49 @@ class SessionServerTests(unittest.TestCase):
         b.close()
         self.assertEqual(self.receive(a)["status"], "peer_left")
         self.assertFalse(module.STATE.rooms["INVITE1"]["invites"])
+
+    def test_trade_preview_offer_revision_confirm_and_cancel(self):
+        a, b = self.client(), self.client()
+        self.exchange(a, {"type": "create", "session": "TRADE1", "name": "host"})
+        guest = self.exchange(b, {"type": "join", "session": "TRADE1", "name": "guest"})
+        self.receive(a)  # enter
+        self.assertEqual(self.exchange(a, {"type": "invite_request", "request": "a" * 16,
+                                           "target": guest["id"], "kind": "trade"})["status"], "pending")
+        self.assertEqual(self.receive(b)["type"], "invite_offer")
+        b.sendall(b'{"type":"invite_reply","request":"aaaaaaaaaaaaaaaa","accept":true}\n')
+        self.assertEqual(self.receive(a)["status"], "accepted")
+        self.assertEqual(self.receive(b)["status"], "accepted")
+        initial = self.receive(a)
+        self.assertEqual(initial["type"], "trade_state")
+        self.assertFalse(initial["transfer_enabled"])
+        self.assertEqual(self.receive(b)["trade"], initial["trade"])
+        trade = initial["trade"]
+        for sock, snapshot in ((a, offer()), (b, offer(1))):
+            sock.sendall((json.dumps({"type": "trade_offer", "trade": trade,
+                                      "offer": snapshot}) + "\n").encode())
+            state = self.receive(a)
+            self.assertEqual(state["phase"], "choosing")
+            self.assertEqual(self.receive(b)["version"], state["version"])
+        version = state["version"]
+        self.assertEqual(self.exchange(a, {"type": "trade_confirm", "trade": trade,
+                                           "version": version - 1})["reason"], "stale_offer")
+        a.sendall((json.dumps({"type": "trade_confirm", "trade": trade,
+                               "version": version}) + "\n").encode())
+        self.assertEqual(len(self.receive(a)["confirmed"]), 1)
+        self.receive(b)
+        b.sendall((json.dumps({"type": "trade_offer", "trade": trade,
+                               "offer": dict(offer(1), name="Changed")}) + "\n").encode())
+        self.assertEqual(self.receive(a)["confirmed"], [])
+        changed = self.receive(b)
+        self.assertEqual(changed["version"], version + 1)
+        for sock in (a, b):
+            sock.sendall((json.dumps({"type": "trade_confirm", "trade": trade,
+                                      "version": changed["version"]}) + "\n").encode())
+            self.assertFalse(self.receive(a)["transfer_enabled"])
+            self.assertFalse(self.receive(b)["transfer_enabled"])
+        self.assertNotIn(trade, module.STATE.rooms["TRADE1"]["trades"])
+        self.assertEqual(self.exchange(a, {"type": "trade_confirm", "trade": trade,
+                                           "version": changed["version"]})["reason"], "unavailable")
 
     def test_ordered_steps_and_warp_validation(self):
         sender, observer = self.client(), self.client()
