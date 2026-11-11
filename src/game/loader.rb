@@ -11,6 +11,8 @@ begin
   load "CoopDev/coop_menus.rb"
   load "CoopDev/coop_title.rb"
   load "CoopDev/coop_online.rb"
+  load "CoopDev/coop_online_map.rb"
+  load "CoopDev/online_qa.rb" if ENV["ANIL_COOP_ONLINE_QA"] == "1"
   load "CoopDev/menu_qa.rb" if ENV["ANIL_COOP_MENU_QA"] == "1"
   load "CoopDev/presence_qa.rb" if ["1", "network", "labels", "followers"].include?(ENV["ANIL_COOP_PRESENCE_QA"])
   load "CoopDev/story_qa.rb" if ENV["ANIL_COOP_STORY_QA"] == "inspect"

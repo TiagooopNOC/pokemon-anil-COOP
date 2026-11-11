@@ -30,7 +30,7 @@ module AnilCoop
         options = ["Jugadores conectados", "Ver ubicación", "Ver equipo (no disponible)",
                    "Intercambiar Pokémon (no disponible)", "Desafiar a combate (no disponible)",
                    "Copiar invitación", "Desconectarse", "Volver"]
-        choice = pbMessage(text, options, 7) { battle_tick }
+        choice = pbMessage(text, options, 7) { tick($scene) }
         case choice
         when 0 then online_players
         when 1 then online_locations
@@ -46,7 +46,7 @@ module AnilCoop
         options = ["Crear partida online", "Unirse a un amigo", "Pegar invitación"]
         options << "Reintentar conexión" if session
         options << "Volver"
-        choice = pbMessage(text, options, options.length - 1) { battle_tick }
+        choice = pbMessage(text, options, options.length - 1) { tick($scene) }
         return if choice < 0 || choice == options.length - 1
         begin
           if session && choice == 3
@@ -94,20 +94,17 @@ module AnilCoop
     names = peers.map do |peer|
       map = peer.dig("position", "map")
       zone = map && GameData::MapMetadata.exists?(map) ? GameData::MapMetadata.get(map).name : "Ubicación no disponible"
-      "#{peer['name']} — #{zone}"
+      "#{peer['name']} — conectado — #{zone}"
     end
-    choice = pbMessage("Jugadores conectados", names + ["Volver"], names.length) { battle_tick }
+    choice = pbMessage("Jugadores conectados", names + ["Volver"], names.length) { tick($scene) }
     return if choice < 0 || choice >= peers.length
     peer = peers[choice]
     option = pbMessage(peer["name"], ["Ver ubicación", "Ver equipo (no disponible)",
                                         "Solicitar intercambio (no disponible)",
-                                        "Desafiar a combate (no disponible)", "Volver"], 4) { battle_tick }
+                                        "Desafiar a combate (no disponible)", "Volver"], 4) { tick($scene) }
     option == 0 ? online_locations(peer["id"]) : pbMessage("Esta función todavía no está disponible.") if option.between?(0, 3)
   end
 
-  def self.online_locations(_selected_id = nil)
-    pbMessage("Mapa Online no disponible en esta versión.")
-  end
 end
 
 module AnilCoopDPPauseMenu
@@ -118,6 +115,20 @@ module AnilCoopDPPauseMenu
       @count = @options.length
       @viewport.rect.height = 24 + 48 * @count
       @viewport.rect.y = -12 if @count >= 8
+      if @count >= 8 && @sprites[:helpful_text_txt]
+        # The native F1 hint sits under the eighth row. Keep the level-cap
+        # information on the left and leave the original menu navigation free.
+        @sprites[:helpful_text_txt].clear
+        @sprites[:helpful_text_txt].draw([_INTL("Nivel máx. actual: {1}", LevelCapsEX.level_cap),
+                                          24, Graphics.height - 45, 0,
+                                          DP_PauseMenu::BaseColor, DP_PauseMenu::ShadowColor])
+        if defined?(ChallengeModes) && ChallengeModes.on?(:MODOVIDAS) &&
+           $PokemonGlobal.challenge_lives && $PokemonGlobal.challenge_lives >= 0
+          @sprites[:helpful_text_txt].draw([_INTL("Vidas: {1}", $PokemonGlobal.challenge_lives),
+                                            24, Graphics.height - 15, 0,
+                                            DP_PauseMenu::BaseColor, DP_PauseMenu::ShadowColor])
+        end
+      end
       @sprites[:bgMid].zoom_y = 48 * @count
       @sprites[:bgBtm].y = 12 + @sprites[:bgMid].zoom_y
       @sprites[:txt].clear
