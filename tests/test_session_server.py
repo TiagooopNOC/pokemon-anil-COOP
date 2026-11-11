@@ -182,6 +182,32 @@ class SessionServerTests(unittest.TestCase):
         self.assertEqual(self.exchange(a, {"type": "trade_confirm", "trade": trade,
                                            "version": changed["version"]})["reason"], "unavailable")
 
+    def test_trade_preview_cancel_and_peer_disconnect_never_commit(self):
+        a, b = self.client(), self.client()
+        self.exchange(a, {"type": "create", "session": "TRADE2", "name": "host"})
+        guest = self.exchange(b, {"type": "join", "session": "TRADE2", "name": "guest"})
+        self.receive(a)  # enter
+        def start(letter):
+            self.assertEqual(self.exchange(a, {"type": "invite_request", "request": letter * 16,
+                                               "target": guest["id"], "kind": "trade"})["status"], "pending")
+            self.receive(b)  # offer
+            b.sendall((json.dumps({"type": "invite_reply", "request": letter * 16,
+                                   "accept": True}) + "\n").encode())
+            self.assertEqual(self.receive(a)["status"], "accepted")
+            self.assertEqual(self.receive(b)["status"], "accepted")
+            state = self.receive(a)
+            self.receive(b)
+            return state["trade"]
+        first = start("a")
+        a.sendall((json.dumps({"type": "trade_cancel", "trade": first}) + "\n").encode())
+        self.assertEqual(self.receive(a)["phase"], "cancelled")
+        self.assertEqual(self.receive(b)["phase"], "cancelled")
+        self.assertFalse(module.STATE.rooms["TRADE2"]["trades"])
+        second = start("b")
+        b.close()
+        self.assertEqual(self.receive(a)["phase"], "peer_left")
+        self.assertNotIn(second, module.STATE.rooms["TRADE2"]["trades"])
+
     def test_ordered_steps_and_warp_validation(self):
         sender, observer = self.client(), self.client()
         self.exchange(sender, {"type": "create", "session": "STEP01", "name": "one"})

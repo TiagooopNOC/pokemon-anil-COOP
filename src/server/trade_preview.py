@@ -2,7 +2,10 @@
 import secrets
 import time
 
-from .coop_battle import validate_view_team
+if __package__:
+    from .coop_battle import validate_view_team
+else:
+    from coop_battle import validate_view_team
 
 
 class TradePreview:
