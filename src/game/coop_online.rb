@@ -28,14 +28,13 @@ module AnilCoop
                "Compañeros: #{names.empty? ? 'ninguno' : names.join(', ')}\n" \
                "Velocidad ×#{@speed_battle_lock ? 1 : ($GameSpeed + 1)}"
         options = ["Jugadores conectados", "Ver ubicación", "Ver equipo",
-                   "Intercambiar Pokémon (no disponible)", "Desafiar a combate (no disponible)",
+                   "Solicitar intercambio", "Desafiar a combate",
                    "Copiar invitación", "Desconectarse", "Volver"]
         choice = pbMessage(text, options, 7) { tick($scene) }
         case choice
         when 0 then online_players
         when 1 then online_locations
-        when 2 then online_players
-        when 3, 4 then pbMessage("Esta función todavía no está disponible.")
+        when 2, 3, 4 then online_players
         when 5 then copy_room_data(session)
         when 6
           menu_stop
@@ -111,8 +110,11 @@ module AnilCoop
         pbMessage("El compañero se desconectó.")
         return
       end
-      options = ["Ver equipo", "Ver ubicación", "Solicitar intercambio (no disponible)",
-                 "Desafiar a combate (no disponible)", "Volver"]
+      trade_request = online_invite_pending(peer_id, "trade")
+      pvp_request = online_invite_pending(peer_id, "pvp")
+      options = ["Ver equipo", "Ver ubicación",
+                 trade_request ? "Cancelar solicitud de intercambio" : "Solicitar intercambio",
+                 pvp_request ? "Cancelar desafío" : "Desafiar a combate", "Volver"]
       choice = pbMessage(peer["name"], options, 4) { tick($scene) }
       return if choice < 0 || choice == 4
       unless @peers.key?(peer_id)
@@ -122,7 +124,14 @@ module AnilCoop
       case choice
       when 0 then online_view_team(peer_id)
       when 1 then online_locations(peer_id)
-      when 2, 3 then pbMessage("Esta función todavía no está disponible.")
+      when 2, 3
+        kind = choice == 2 ? "trade" : "pvp"
+        pending = choice == 2 ? trade_request : pvp_request
+        begin
+          pending ? online_invite_cancel(pending) : online_invite_send(peer_id, kind)
+        rescue StandardError => e
+          pbMessage("Invitación: #{e.message}")
+        end
       end
     end
   end

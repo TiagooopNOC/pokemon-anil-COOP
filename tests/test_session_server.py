@@ -107,6 +107,37 @@ class SessionServerTests(unittest.TestCase):
         b.close()
         self.assertEqual(self.receive(a)["reason"], "peer_left")
 
+    def test_invitations_are_targeted_and_have_no_gameplay_effect(self):
+        a, b = self.client(), self.client()
+        self.exchange(a, {"type": "create", "session": "INVITE1", "name": "same"})
+        guest = self.exchange(b, {"type": "join", "session": "INVITE1", "name": "same"})
+        self.receive(a)  # enter
+        self.assertEqual(self.exchange(a, {"type": "invite_request", "request": "f" * 16,
+                                           "target": guest["id"], "kind": []})["status"], "unavailable")
+        def request(code, kind):
+            packet = {"type": "invite_request", "request": code * 16,
+                      "target": guest["id"], "kind": kind}
+            self.assertEqual(self.exchange(a, packet)["status"], "pending")
+            self.assertEqual(self.receive(b)["kind"], kind)
+        request("a", "trade")
+        self.assertEqual(self.exchange(a, {"type": "invite_request", "request": "b" * 16,
+                                           "target": guest["id"], "kind": "trade"})["status"], "unavailable")
+        b.sendall(b'{"type":"invite_reply","request":"aaaaaaaaaaaaaaaa","accept":false}\n')
+        self.assertEqual(self.receive(a)["status"], "declined")
+        self.assertEqual(self.receive(b)["status"], "declined")
+        request("c", "pvp")
+        b.sendall(b'{"type":"invite_reply","request":"cccccccccccccccc","accept":true}\n')
+        self.assertEqual(self.receive(a)["status"], "accepted")
+        self.assertEqual(self.receive(b)["status"], "accepted")
+        request("d", "trade")
+        a.sendall(b'{"type":"invite_cancel","request":"dddddddddddddddd"}\n')
+        self.assertEqual(self.receive(a)["status"], "cancelled")
+        self.assertEqual(self.receive(b)["status"], "cancelled")
+        request("e", "trade")
+        b.close()
+        self.assertEqual(self.receive(a)["status"], "peer_left")
+        self.assertFalse(module.STATE.rooms["INVITE1"]["invites"])
+
     def test_ordered_steps_and_warp_validation(self):
         sender, observer = self.client(), self.client()
         self.exchange(sender, {"type": "create", "session": "STEP01", "name": "one"})

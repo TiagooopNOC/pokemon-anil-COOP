@@ -25,6 +25,7 @@ VALID_NAME = re.compile(r"[\w -]{1,24}\Z", re.UNICODE)
 VALID_SPRITE = re.compile(r"[\w -]{1,80}\Z", re.UNICODE)
 VALID_FOLLOWER_SPRITE = re.compile(r"Followers(?: shiny)?/[\w -]{1,80}\.png\Z", re.UNICODE)
 VALID_VIEW_REQUEST = re.compile(r"[a-f0-9]{16}\Z")
+INVITE_KINDS = frozenset(("trade", "pvp"))
 FOLLOWER_KEYS = frozenset(("map", "x", "y", "direction", "pattern", "seq",
                            "hue", "speed", "sprite", "steps", "warp"))
 LOCAL_SECRET = "local-development-only"
@@ -67,7 +68,7 @@ class State:
                     if code in self.rooms:
                         return {"type": "error", "reason": "session_exists"}, None
                     self.rooms[code] = {"members": {}, "next_slot": 1, "trainers": {},
-                                        "view_requests": {},
+                                        "view_requests": {}, "invites": {},
                                         "host": None, "speed": 0}
                 room = self.rooms.get(code)
                 if not room:
@@ -109,6 +110,62 @@ class State:
             player = room["members"].get(player_id) if room else None
             if not player or player["sock"] is not sock:
                 return {"type": "error", "reason": "invalid_session"}, None
+            now = time.monotonic()
+            for invite_id, invite in list(room["invites"].items()):
+                if now - invite["created"] <= 45:
+                    continue
+                del room["invites"][invite_id]
+                self.invite_notify(room, invite_id, invite, "expired")
+            if kind.startswith("invite_"):
+                invite_id = message.get("request")
+                if not isinstance(invite_id, str) or not VALID_VIEW_REQUEST.fullmatch(invite_id):
+                    return {"type": "invite_state", "request": "", "status": "invalid"}, identity
+                invites = room["invites"]
+                if kind == "invite_request":
+                    target = message.get("target")
+                    invite_kind = message.get("kind")
+                    recipient = room["members"].get(target) if isinstance(target, str) else None
+                    if (message.keys() != {"type", "request", "target", "kind"} or
+                            not isinstance(invite_kind, str) or invite_kind not in INVITE_KINDS or not recipient or
+                            recipient["sock"] is None or target == player_id or
+                            invite_id in invites or len(invites) >= 8 or
+                            any((entry["from"], entry["to"], entry["kind"]) ==
+                                (player_id, target, invite_kind) for entry in invites.values())):
+                        return {"type": "invite_state", "request": invite_id,
+                                "status": "unavailable"}, identity
+                    invite = {"from": player_id, "to": target, "kind": invite_kind,
+                              "created": now}
+                    invites[invite_id] = invite
+                    try:
+                        self.send_one(recipient["sock"], {"type": "invite_offer",
+                                      "request": invite_id, "from": player_id,
+                                      "name": player["name"], "kind": invite_kind})
+                    except OSError:
+                        del invites[invite_id]
+                        return {"type": "invite_state", "request": invite_id,
+                                "status": "unavailable"}, identity
+                    return {"type": "invite_state", "request": invite_id,
+                            "status": "pending", "kind": invite_kind,
+                            "peer": target}, identity
+                invite = invites.get(invite_id)
+                if kind == "invite_reply":
+                    if (message.keys() != {"type", "request", "accept"} or not invite or
+                            invite["to"] != player_id or type(message["accept"]) is not bool):
+                        return {"type": "invite_state", "request": invite_id,
+                                "status": "invalid"}, identity
+                    status = "accepted" if message["accept"] else "declined"
+                    del invites[invite_id]
+                    self.invite_notify(room, invite_id, invite, status)
+                    return None, identity
+                if kind == "invite_cancel":
+                    if message.keys() != {"type", "request"} or not invite or invite["from"] != player_id:
+                        return {"type": "invite_state", "request": invite_id,
+                                "status": "invalid"}, identity
+                    del invites[invite_id]
+                    self.invite_notify(room, invite_id, invite, "cancelled")
+                    return None, identity
+                return {"type": "invite_state", "request": invite_id,
+                        "status": "invalid"}, identity
             if kind.startswith("team_view_"):
                 pending = room["view_requests"]
                 now = time.monotonic()
@@ -460,6 +517,17 @@ class State:
     def send_one(sock, message):
         sock.sendall((json.dumps(message, separators=(",", ":")) + "\n").encode())
 
+    def invite_notify(self, room, invite_id, invite, status):
+        packet = {"type": "invite_state", "request": invite_id,
+                  "status": status, "kind": invite["kind"]}
+        for player_id in (invite["from"], invite["to"]):
+            player = room["members"].get(player_id)
+            if player and player["sock"]:
+                try:
+                    self.send_one(player["sock"], dict(packet, peer=(invite["to"] if player_id == invite["from"] else invite["from"])))
+                except OSError:
+                    pass
+
     @staticmethod
     def public(player):
         return {"id": player["id"], "slot": player["slot"], "name": player["name"],
@@ -485,6 +553,11 @@ class State:
             if player and player["sock"] is sock:
                 player["sock"] = None
                 player["position"] = None
+                for invite_id, invite in list(room["invites"].items()):
+                    if player["id"] not in (invite["from"], invite["to"]):
+                        continue
+                    del room["invites"][invite_id]
+                    self.invite_notify(room, invite_id, invite, "peer_left")
                 for request_id, entry in list(room["view_requests"].items()):
                     if player["id"] not in (entry["from"], entry["to"]):
                         continue
