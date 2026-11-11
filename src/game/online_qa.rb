@@ -47,6 +47,16 @@ module AnilCoopOnlineQA
       peers = AnilCoop.instance_variable_get(:@peers)
       peers.length == 1 && peers.values.first["position"].is_a?(Hash)
     end
+    $anil_online_qa_close_menu = true
+    3.times do
+      AnilCoop.online_menu
+      raise "X disconnected Online" unless AnilCoop.connected?
+      raise "X removed companion" unless AnilCoop.instance_variable_get(:@peers).length == 1
+    end
+    AnilCoop.online_players
+    raise "X disconnected player list" unless AnilCoop.connected?
+    raise "X confirmed disconnection" if AnilCoop.confirm_online_disconnect
+    $anil_online_qa_close_menu = false
     local_location = AnilCoop.online_map_position($game_map.map_id, $game_player.x, $game_player.y)
     raise "loaded map has no regional position" unless local_location
     raise "lab interior is on the wrong regional tile" unless AnilCoop.online_map_position(29)&.first(3) == [0, 7, 14]

@@ -88,13 +88,17 @@ module AnilCoop
 
   def self.copy_room_data(session)
     labels = ["Copiar invitación", "Copiar IP", "Copiar código", "Volver"]
-    choice = pbMessage("Datos de la sala", labels, 3)
+    choice = pbMessage("Datos de la sala", labels, -1)
     return if choice == 3 || choice == -1
     value = [invitation(session["host"], session["code"]), session["host"], session["code"]][choice]
     Input.clipboard = value
     pbMessage("Copiado al portapapeles.")
   rescue StandardError
     pbMessage("No se pudo usar el portapapeles en este equipo.")
+  end
+
+  def self.confirm_online_disconnect
+    pbMessage("¿Querés desconectarte de la sala?", ["Sí", "No"], -1, nil, 1) { battle_tick } == 0
   end
 
   def self.multiplayer_menu
@@ -107,7 +111,7 @@ module AnilCoop
         text = "Sala #{session['code']} | #{session['host']}\n" \
                "Estado: #{connected? ? 'conectado' : 'sin conexión'} | " \
                "Jugadores: #{1 + @peers.length}#{peers.empty? ? '' : " (#{peers})"}"
-        choice = pbMessage(text, ["Cargar partida", "Copiar datos", "Reintentar", "Desconectar", "Volver"], 4) { battle_tick }
+        choice = pbMessage(text, ["Cargar partida", "Copiar datos", "Reintentar", "Desconectar", "Volver"], -1) { battle_tick }
         case choice
         when 0, 4, -1 then return
         when 1 then copy_room_data(session)
@@ -118,11 +122,11 @@ module AnilCoop
           rescue StandardError => e
             pbMessage(e.message)
           end
-        when 3 then menu_stop
+        when 3 then menu_stop if confirm_online_disconnect
         end
       else
         choice = pbMessage("Conectate antes de cargar tu partida.",
-                           ["Crear partida", "Unirse a un amigo", "Pegar invitación", "Volver"], 3)
+                           ["Crear partida", "Unirse a un amigo", "Pegar invitación", "Volver"], -1)
         return if choice == 3 || choice == -1
         begin
           if choice == 0

@@ -30,15 +30,17 @@ module AnilCoop
         options = ["Jugadores conectados", "Ver ubicación", "Ver equipo",
                    "Solicitar intercambio", "Desafiar a combate",
                    "Copiar invitación", "Desconectarse", "Volver"]
-        choice = pbMessage(text, options, 7) { tick($scene) }
+        choice = pbMessage(text, options, -1) { tick($scene) }
         case choice
         when 0 then online_players
         when 1 then online_locations
         when 2, 3, 4 then online_players
         when 5 then copy_room_data(session)
         when 6
-          menu_stop
-          pbMessage("Te desconectaste. Tu partida sigue abierta.")
+          if confirm_online_disconnect
+            menu_stop
+            pbMessage("Te desconectaste. Tu partida sigue abierta.")
+          end
         else return
         end
       else
@@ -46,7 +48,7 @@ module AnilCoop
         options = ["Crear partida online", "Unirse a un amigo", "Pegar invitación"]
         options << "Reintentar conexión" if session
         options << "Volver"
-        choice = pbMessage(text, options, options.length - 1) { tick($scene) }
+        choice = pbMessage(text, options, -1) { tick($scene) }
         return if choice < 0 || choice == options.length - 1
         begin
           if session && choice == 3
@@ -97,7 +99,7 @@ module AnilCoop
         zone = map && GameData::MapMetadata.exists?(map) ? GameData::MapMetadata.get(map).name : "Ubicación no disponible"
         "#{peer['name']} — conectado — #{zone}"
       end
-      choice = pbMessage("Jugadores conectados", names + ["Volver"], names.length) { tick($scene) }
+      choice = pbMessage("Jugadores conectados", names + ["Volver"], -1) { tick($scene) }
       return if choice < 0 || choice >= peers.length
       online_peer_menu(peers[choice]["id"])
     end
@@ -115,7 +117,7 @@ module AnilCoop
       options = ["Ver equipo", "Ver ubicación",
                  trade_request ? "Cancelar solicitud de intercambio" : "Solicitar intercambio",
                  pvp_request ? "Cancelar desafío" : "Desafiar a combate", "Volver"]
-      choice = pbMessage(peer["name"], options, 4) { tick($scene) }
+      choice = pbMessage(peer["name"], options, -1) { tick($scene) }
       return if choice < 0 || choice == 4
       unless @peers.key?(peer_id)
         pbMessage("El compañero se desconectó.")
