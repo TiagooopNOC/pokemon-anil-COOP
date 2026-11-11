@@ -6,7 +6,7 @@ class AnilCoopRemoteCharacter < Game_Character
   def name; ""; end
 
   # Only the sprite moves; Game_Character#update would run local map step hooks.
-  def follow_network(pos, now = System.uptime)
+  def follow_network(pos, now = System.uptime, advance: true)
     @remote_steps ||= []
     packet_id = pos.key?("seq") ? pos["seq"] : pos.object_id
     if packet_id != @remote_packet_id
@@ -24,6 +24,9 @@ class AnilCoopRemoteCharacter < Game_Character
           if target == [pos["x"], pos["y"]] && @remote_steps.length + steps.length <= 32
             @remote_steps.concat(steps)
           else
+            AnilCoop.log("remote resync sprite=#{character_name} at=#{[@x, @y].inspect} " \
+                         "expected=#{target.inspect} packet=#{[pos['x'], pos['y']].inspect} " \
+                         "pending=#{@remote_steps.length} incoming=#{steps.length}")
             snap_remote(pos["x"], pos["y"])
           end
         else
@@ -38,6 +41,7 @@ class AnilCoopRemoteCharacter < Game_Character
         end
       end
     end
+    return unless advance
     if @remote_start
       fraction = [[(now - @remote_start) / @remote_duration, 0.0].max, 1.0].min
       @real_x = @remote_from_x + ((@x * Game_Map::REAL_RES_X) - @remote_from_x) * fraction
@@ -112,6 +116,7 @@ end
 
 module AnilCoop
   @peers = {}
+  @position_queue = {}
   @sprites = {}
   @labels = {}
   @follower_sprites = {}
@@ -296,11 +301,13 @@ module AnilCoop
   end
 
   def self.disconnect
+    speed_disconnect if respond_to?(:speed_disconnect)
     @battle_failure = "connection lost" if @active_battle
     @socket&.close rescue nil
     @socket = nil
     @id = nil
     @peers.clear
+    @position_queue.clear
     @pending_steps = []
     @last_sent_position = nil
     @steps_overflow = false
@@ -327,7 +334,7 @@ module AnilCoop
     sprite.dispose if sprite && !sprite.disposed?
   end
 
-  def self.update_follower_sprite(id, position)
+  def self.update_follower_sprite(id, position, advance: true)
     unless position.is_a?(Hash) && position["map"] == @map && !position["sprite"].to_s.empty?
       remove_follower_sprite(id)
       return
@@ -338,14 +345,14 @@ module AnilCoop
       character.through = true
       character.character_name = position["sprite"]
       character.character_hue = position["hue"]
-      character.follow_network(position)
+      character.follow_network(position, advance: false)
       sprite = Sprite_Character.new(Spriteset_Map.viewport, character)
       @follower_sprites[id] = sprite
     end
     character = sprite.character
     character.character_name = position["sprite"]
     character.character_hue = position["hue"]
-    character.follow_network(position)
+    character.follow_network(position, advance: advance)
     sprite.update
   end
 
@@ -389,18 +396,35 @@ module AnilCoop
       @peers.clear
       Array(message["peers"]).each { |p| @peers[p["id"]] = p if p.is_a?(Hash) && p["id"].is_a?(String) }
       log("welcome slot=#{@slot} peers=#{@peers.length}")
+      speed_receive(message) if respond_to?(:speed_receive)
+      speed_welcome if respond_to?(:speed_welcome)
     when "enter", "position"
       p = message["player"]
       @peers[p["id"]] = p if p.is_a?(Hash) && p["id"].is_a?(String) && p["id"] != @id
+      if message["type"] == "position" && p.is_a?(Hash) && p["id"].is_a?(String) &&
+         p["position"].is_a?(Hash) && p["id"] != @id
+        packets = (@position_queue[p["id"]] ||= [])
+        packets << p["position"]
+        if packets.length > 32
+          latest = p["position"].merge("warp" => true, "steps" => [], "follower" => nil)
+          packets.replace([latest])
+          log("remote packet queue overflow; resync slot=#{p['slot']}")
+        end
+      end
       log("peer #{message["type"]} slot=#{p["slot"]}") if p.is_a?(Hash) && message["type"] == "enter"
+      speed_receive(message) if message["type"] == "enter" && respond_to?(:speed_receive)
     when "leave"
       @peers.delete(message["id"])
+      @position_queue.delete(message["id"])
       if (sprite = @sprites.delete(message["id"]))
         sprite.dispose unless sprite.disposed?
       end
       remove_label(message["id"])
       remove_follower_sprite(message["id"])
       log("peer left #{message["id"]}")
+      speed_receive(message) if respond_to?(:speed_receive)
+    when "speed_state"
+      speed_receive(message) if respond_to?(:speed_receive)
     when "trainer_state"
       @trainer_states[[message["map"], message["event"]]] = message
       log("trainer state map=#{message["map"]} event=#{message["event"]} phase=#{message["phase"]} players=#{message["participants"].length}")
@@ -415,6 +439,8 @@ module AnilCoop
       log("server error #{message["reason"]}")
       if message["reason"].to_s.start_with?("battle_")
         @battle_failure = message["reason"] if @active_battle
+      elsif message["reason"].to_s.start_with?("speed_") || message["reason"] == "invalid_speed"
+        log("speed request rejected #{message['reason']}")
       elsif message["reason"].to_s.start_with?("trainer_") || message["reason"] == "coop_battle_pending"
         @trainer_error = message["reason"]
       else
@@ -650,6 +676,9 @@ module AnilCoop
     end
     @peers.each do |id, peer|
       pos = peer["position"]
+      positions = @position_queue.delete(id) || []
+      positions.select! { |entry| entry["map"] == @map }
+      positions = [pos] if positions.empty?
       if !pos.is_a?(Hash) || pos["map"] != @map || pos["sprite"].to_s.empty?
         if (sprite = @sprites.delete(id))
           sprite.dispose unless sprite.disposed?
@@ -662,17 +691,19 @@ module AnilCoop
       unless sprite
         character = AnilCoopRemoteCharacter.new($game_map)
         character.through = true
-        character.character_name = pos["sprite"]
-        character.follow_network(pos)
+        character.character_name = positions.first["sprite"]
+        character.follow_network(positions.first, advance: false)
         sprite = Sprite_Character.new(Spriteset_Map.viewport, character)
         @sprites[id] = sprite
         log("peer visible slot=#{peer["slot"]} map=#{@map}")
       end
       character = sprite.character
       character.character_name = pos["sprite"]
+      positions.each { |entry| character.follow_network(entry, advance: false) }
       character.follow_network(pos)
       sprite.update
       update_label(id, peer["name"], sprite)
+      positions.each { |entry| update_follower_sprite(id, entry["follower"], advance: false) }
       update_follower_sprite(id, pos["follower"])
     end
   rescue StandardError => e

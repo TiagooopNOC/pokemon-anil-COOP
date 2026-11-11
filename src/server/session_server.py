@@ -65,7 +65,8 @@ class State:
                 if kind == "create":
                     if code in self.rooms:
                         return {"type": "error", "reason": "session_exists"}, None
-                    self.rooms[code] = {"members": {}, "next_slot": 1, "trainers": {}}
+                    self.rooms[code] = {"members": {}, "next_slot": 1, "trainers": {},
+                                        "host": None, "speed": 0}
                 room = self.rooms.get(code)
                 if not room:
                     return {"type": "error", "reason": "no_session"}, None
@@ -89,10 +90,16 @@ class State:
                               "name": name, "sock": sock, "position": None, "last": time.monotonic(), "seq": -1}
                     room["members"][player["id"]] = player
                 identity = (code, player["id"])
+                if kind == "create":
+                    room["host"] = player["id"]
                 peers = [self.public(p) for p in room["members"].values() if p["sock"] is not None and p is not player]
-                self.broadcast(room, {"type": "enter", "player": self.public(player)}, except_sock=sock)
+                active_speed = room["members"][room["host"]]["sock"] is not None and bool(peers)
+                self.broadcast(room, {"type": "enter", "player": self.public(player),
+                                      "host": room["host"], "speed": room["speed"],
+                                      "speed_active": active_speed}, except_sock=sock)
                 return {"type": "welcome", "session": code, "id": player["id"], "slot": player["slot"],
-                        "resume": player["token"], "peers": peers}, identity
+                        "resume": player["token"], "peers": peers, "host": room["host"],
+                        "speed": room["speed"], "speed_active": active_speed}, identity
             if not identity:
                 return {"type": "error", "reason": "join_first"}, None
             code, player_id = identity
@@ -116,6 +123,20 @@ class State:
                     self.battle_notify(room, encounter, packet)
                     if packet["stage"] == "result":
                         self.battle_close(room, key, None)
+                return None, identity
+            if kind == "speed_set":
+                speed = message.get("speed")
+                if player_id != room["host"]:
+                    return {"type": "error", "reason": "speed_not_host"}, identity
+                if type(speed) is not int or speed not in (0, 1, 2):
+                    return {"type": "error", "reason": "invalid_speed"}, identity
+                if any(e.get("battle") and player_id in e["battle"].players
+                       for e in room["trainers"].values()):
+                    return {"type": "error", "reason": "speed_battle_locked"}, identity
+                room["speed"] = speed
+                active_speed = sum(p["sock"] is not None for p in room["members"].values()) >= 2
+                self.broadcast(room, {"type": "speed_state", "host": room["host"],
+                                      "speed": speed, "speed_active": active_speed})
                 return None, identity
             if kind == "position":
                 keys = ("map", "x", "y", "direction", "pattern", "seq")
@@ -403,7 +424,11 @@ class State:
             if player and player["sock"] is sock:
                 player["sock"] = None
                 player["position"] = None
-                self.broadcast(room, {"type": "leave", "id": player["id"]})
+                active_speed = room["members"][room["host"]]["sock"] is not None and sum(
+                    p["sock"] is not None for p in room["members"].values()) >= 2
+                self.broadcast(room, {"type": "leave", "id": player["id"],
+                                      "host": room["host"], "speed": room["speed"],
+                                      "speed_active": active_speed})
                 for key, encounter in list(room["trainers"].items()):
                     if player["id"] not in encounter["participants"]:
                         continue

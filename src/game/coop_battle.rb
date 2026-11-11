@@ -144,6 +144,7 @@ module AnilCoop
     return false unless qa_2v2? && state["participants"].length == 2 &&
       (state["event"] == 9000 || state["prototype"] == "personal2v2-v1")
     @active_battle = state["battle"]
+    speed_battle_enter if respond_to?(:speed_battle_enter)
     @battle_seq = 0
     @battle_failure = nil
     @battle_completed = false
@@ -270,6 +271,7 @@ module AnilCoop
     ensure
       @active_battle = @battle_failure = @battle_reply = nil
       @battle_context = @battle_phase = @battle_status_logged_at = nil
+      speed_battle_exit if respond_to?(:speed_battle_exit)
     end
   end
 end
@@ -487,6 +489,7 @@ class AnilCoopBattle < Battle
   end
 
   def pbCommandPhaseLoop(is_player)
+    AnilCoop.speed_battle_enforce if AnilCoop.respond_to?(:speed_battle_enforce)
     if is_player
       AnilCoop.battle_phase("player_menu")
       digest = coop_digest  # before the local menu can register a switch

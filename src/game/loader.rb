@@ -7,6 +7,7 @@ begin
   load "CoopDev/coop_challenge.rb"
   load "CoopDev/coop_result.rb"
   load "CoopDev/coop_battle.rb"
+  load "CoopDev/coop_speed.rb"
   load "CoopDev/coop_menus.rb"
   load "CoopDev/coop_title.rb" if ENV["ANIL_COOP_MENU"] == "1"
   load "CoopDev/menu_qa.rb" if ENV["ANIL_COOP_MENU_QA"] == "1"
@@ -14,6 +15,7 @@ begin
   load "CoopDev/story_qa.rb" if ENV["ANIL_COOP_STORY_QA"] == "inspect"
   load "CoopDev/challenge_qa.rb" if ENV["ANIL_COOP_CHALLENGE_QA"]
   load "CoopDev/battle_qa.rb" if ENV["ANIL_COOP_QA_BOT"]
+  load "CoopDev/speed_qa.rb" if ENV["ANIL_COOP_SPEED_QA"] == "1"
   File.open(log_path, "a") { |f| f.puts("#{Time.now.utc} presence script loaded") }
 rescue Exception => e
   File.open(log_path, "a") { |f| f.puts("#{Time.now.utc} #{e.class}: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}") }

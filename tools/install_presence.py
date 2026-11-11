@@ -50,12 +50,14 @@ def main():
         shutil.copy2(ROOT / "src/game/coop_result.rb", game / "CoopDev/coop_result.rb")
         shutil.copy2(ROOT / "src/game/coop_team.rb", game / "CoopDev/coop_team.rb")
         shutil.copy2(ROOT / "src/game/coop_menus.rb", game / "CoopDev/coop_menus.rb")
+        shutil.copy2(ROOT / "src/game/coop_speed.rb", game / "CoopDev/coop_speed.rb")
         shutil.copy2(ROOT / "src/game/coop_title.rb", game / "CoopDev/coop_title.rb")
         shutil.copy2(ROOT / "src/game/menu_qa.rb", game / "CoopDev/menu_qa.rb")
         shutil.copy2(ROOT / "src/game/presence_qa.rb", game / "CoopDev/presence_qa.rb")
         shutil.copy2(ROOT / "src/game/story_qa.rb", game / "CoopDev/story_qa.rb")
         shutil.copy2(ROOT / "src/game/challenge_qa.rb", game / "CoopDev/challenge_qa.rb")
         shutil.copy2(ROOT / "src/game/battle_qa.rb", game / "CoopDev/battle_qa.rb")
+        shutil.copy2(ROOT / "src/game/speed_qa.rb", game / "CoopDev/speed_qa.rb")
         shutil.copy2(loader, game / "CoopDev/loader.rb")
         # Añil does not call rgss_main, so mkxp's postloadScript never runs.
         # The preloaded isolation script triggers this loader after plugins run.
