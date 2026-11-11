@@ -100,9 +100,6 @@ class State:
             player = room["members"].get(player_id) if room else None
             if not player or player["sock"] is not sock:
                 return {"type": "error", "reason": "invalid_session"}, None
-            for key, encounter in list(room["trainers"].items()):
-                if encounter.get("battle") and time.monotonic() > encounter["battle"].deadline:
-                    self.battle_close(room, key, "battle_timeout")
             if kind in ("battle_step", "battle_abort"):
                 found = next(((k, e) for k, e in room["trainers"].items()
                               if e.get("battle") and e["battle"].id == message.get("battle")), None)
@@ -197,6 +194,11 @@ class State:
                 self.broadcast(room, {"type": "position", "player": self.public(player)}, except_sock=sock)
                 return None, identity
             if kind == "ping":
+                for encounter in room["trainers"].values():
+                    battle = encounter.get("battle")
+                    if battle and player_id in battle.players:
+                        return {"type": "pong", "battle": battle.id,
+                                "diagnostic": battle.diagnostic()}, identity
                 return {"type": "pong"}, identity
             if kind == "trainer_wait":
                 map_id, event_id, forced = message.get("map"), message.get("event"), message.get("forced")
@@ -372,7 +374,8 @@ class State:
         encounter = room["trainers"].pop(key)
         if reason:
             self.battle_notify(room, encounter, {"type": "battle_abort",
-                               "battle": encounter["battle"].id, "reason": reason})
+                               "battle": encounter["battle"].id, "reason": reason,
+                               "diagnostic": encounter["battle"].diagnostic()})
         self.broadcast(room, {"type": "trainer_closed", "map": encounter["map"], "event": encounter["event"]})
 
     @staticmethod

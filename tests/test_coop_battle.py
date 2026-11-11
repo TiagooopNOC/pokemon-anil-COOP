@@ -71,6 +71,18 @@ class BattleBarrierTests(unittest.TestCase):
         self.assertEqual(self.step("host", "enemy", [["move", 0, 0], ["move", 1, 2]]), (None, None))
         self.assertIsNotNone(self.step("guest", "enemy")[1])
 
+    def test_diagnostic_identifies_pending_owner_and_last_action(self):
+        self.setup_battle()
+        self.step("guest", "turn", ["switch", 2, -1])
+        info = self.battle.diagnostic()
+        self.assertEqual((info["turn"], info["seq"], info["pending"], info["awaiting"]),
+                         (0, 1, [1], [0]))
+        self.assertEqual((info["stage"], info["completed"]), ("turn", "setup"))
+        self.assertEqual(info["last"][1]["action"], "switch")
+        self.assertEqual(BattleExchange.action_kind([2, 4]), "switch")
+        self.assertIsNone(self.step("host", "turn", ["move", 0, 1])[0])
+        self.assertEqual(self.battle.diagnostic()["turn"], 1)
+
     def test_enemy_medicine_order_is_replayed_only_after_both_acknowledge(self):
         self.setup_battle()
         self.step("host", "turn", ["move", 0, 1])
@@ -171,12 +183,21 @@ class BattleLobbyTests(unittest.TestCase):
         self.assertIsNone(self.call(1, "battle_abort", battle=battle.id))
         self.assertFalse(self.state.rooms["BATTLE1"]["trainers"])
 
-    def test_timeout_not_extended_by_heartbeat(self):
+    def test_long_menu_wait_with_heartbeats_preserves_battle(self):
         battle = self.start()
-        battle.deadline = time.monotonic() - 1
-        self.call(0, "ping")
-        self.assertFalse(self.state.rooms["BATTLE1"]["trainers"])
-        self.assertEqual(self.peers[1].messages[0]["reason"], "battle_timeout")
+        battle.last_completed = time.monotonic() - 240
+        status = self.call(0, "ping")
+        self.call(1, "ping")
+        self.assertEqual(status["battle"], battle.id)
+        self.assertGreaterEqual(status["diagnostic"]["elapsed"], 239)
+        self.assertEqual(status["diagnostic"]["seq"], 0)
+        self.assertIn("28:9000", self.state.rooms["BATTLE1"]["trainers"])
+        self.assertFalse(any(m["type"] == "battle_abort" for m in self.peers[0].messages))
+        self.assertIsNone(self.call(0, "battle_step", battle=battle.id, seq=0,
+                                    stage="setup", digest="a" * 64, command=None))
+        self.assertIsNone(self.call(1, "battle_step", battle=battle.id, seq=0,
+                                    stage="setup", digest="a" * 64, command=None))
+        self.assertEqual(battle.seq, 1)
 
     def test_result_requires_agreement_and_replay_cannot_reward(self):
         battle = self.start()

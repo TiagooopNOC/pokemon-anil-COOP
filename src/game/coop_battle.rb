@@ -31,9 +31,33 @@ module AnilCoop
     return unless @active_battle == message["battle"]
     if message["type"] == "battle_abort"
       @battle_failure = message["reason"]
+      log("2v2 abort reason=#{message['reason']} diagnostic=#{JSON.generate(message['diagnostic'])}")
     elsif message["seq"] == @battle_seq
       @battle_reply = message
     end
+  end
+
+  def self.battle_wait_status(message)
+    return unless @active_battle == message["battle"] && message["diagnostic"].is_a?(Hash)
+    info = message["diagnostic"]
+    return unless info["elapsed"].to_f >= 20
+    now = System.uptime
+    return if @battle_status_logged_at && now - @battle_status_logged_at < 30
+    @battle_status_logged_at = now
+    log("2v2 peer wait #{JSON.generate(info)} local=#{battle_debug_context}")
+  end
+
+  def self.battle_debug_context
+    battle = @battle_context
+    return "phase=#{@battle_phase || 'setup'}" unless battle
+    battlers = battle.instance_variable_get(:@battlers) || []
+    hp = battlers.map { |b| b ? b.hp : nil }
+    "turn=#{battle.instance_variable_get(:@turnCount)} phase=#{@battle_phase || 'setup'} hp=#{hp.inspect}"
+  end
+
+  def self.battle_phase(phase)
+    @battle_phase = phase
+    log("2v2 phase #{battle_debug_context} seq=#{@battle_seq}")
   end
 
   def self.battle_barrier(stage, digest, command = nil, scene = nil)
@@ -41,7 +65,9 @@ module AnilCoop
     @battle_reply = nil
     queue(type: "battle_step", battle: @active_battle, seq: @battle_seq,
           stage: stage, digest: digest, command: command)
-    log("2v2 submit seq=#{@battle_seq} stage=#{stage} digest=#{digest}")
+    @battle_phase = stage
+    action = command.is_a?(Array) ? (command[0].is_a?(Array) ? command.map { |c| c[0] } : command[0]) : "none"
+    log("2v2 submit seq=#{@battle_seq} stage=#{stage} action=#{action.inspect} #{battle_debug_context}")
     if scene && scene.respond_to?(:pbShowWindow)
       scene.pbShowWindow(Battle::Scene::MESSAGE_BOX)
       waiting_window = scene.sprites["messageWindow"]
@@ -49,12 +75,18 @@ module AnilCoop
       waiting_window.letterbyletter = false
       waiting_window.text = "Esperando la orden del compañero..."
     end
-    deadline = System.uptime + 120
+    started = System.uptime
+    next_report = started + 15
     loop do
       battle_tick
       raise BattleStopped, (@battle_failure || "connection lost") if @battle_failure || !connected?
       break if @battle_reply
-      raise BattleStopped, "timeout waiting for partner" if System.uptime > deadline
+      now = System.uptime
+      if now >= next_report
+        log("2v2 waiting seq=#{@battle_seq} stage=#{stage} elapsed=#{(now - started).round(1)} " \
+            "#{battle_debug_context}")
+        next_report = now + 15
+      end
       Graphics.update
       Input.update
       scene.pbUpdate if scene
@@ -63,7 +95,8 @@ module AnilCoop
     raise BattleStopped, "invalid barrier reply" unless packet["stage"] == stage && packet["digest"] == digest
     @battle_seq += 1
     @battle_completed = true if stage == "result"
-    log("2v2 barrier seq=#{packet['seq']} stage=#{stage} digest=#{digest}")
+    log("2v2 barrier seq=#{packet['seq']} stage=#{stage} elapsed=#{(System.uptime - started).round(1)} " \
+        "#{battle_debug_context}")
     packet
   ensure
     waiting_window.letterbyletter = old_letterbyletter if waiting_window
@@ -179,6 +212,7 @@ module AnilCoop
     scene ||= BattleCreationHelperMethods.create_battle_scene
     local_index = state["participants"].index { |p| p["id"] == @id } * 2
     battle = AnilCoopBattle.new(scene, p1, p2, trainers, [foe], local_index, state["seed"], team_sizes: team_sizes, personal: personal, enemy_origins: enemy_origins)
+    @battle_context = battle
     if state["enemy_trainer"]
       inventory = state["enemy_trainer"].fetch("items", [])
       raise BattleStopped, "unsupported trainer item" unless inventory.is_a?(Array) &&
@@ -235,6 +269,7 @@ module AnilCoop
       log(@last_qa_result[:error])
     ensure
       @active_battle = @battle_failure = @battle_reply = nil
+      @battle_context = @battle_phase = @battle_status_logged_at = nil
     end
   end
 end
@@ -453,11 +488,13 @@ class AnilCoopBattle < Battle
 
   def pbCommandPhaseLoop(is_player)
     if is_player
+      AnilCoop.battle_phase("player_menu")
       digest = coop_digest  # before the local menu can register a switch
       super(true)
       packet = AnilCoop.battle_barrier("turn", digest, coop_order(@coop_local), @scene)
       packet["commands"].each_with_index { |order, i| coop_apply(i * 2, order) }
     else
+      AnilCoop.battle_phase("enemy_ai")
       digest = coop_digest
       commands = nil
       if @coop_local == 0
@@ -473,22 +510,37 @@ class AnilCoopBattle < Battle
   end
 
   def pbSwitchInBetween(index, check_lax = false, can_cancel = false)
-    return super if index.odd?
+    AnilCoop.battle_phase("replacement_#{index}")
+    if index.odd?
+      selected = super
+      AnilCoop.log("2v2 enemy replacement index=#{index} slot=#{selected}")
+      return selected
+    end
     # The fixture has no pivot moves: replacement is mandatory after fainting.
     digest = coop_digest
     selected = index == @coop_local ? pbPartyScreen(index, check_lax, false) : -1
     packet = AnilCoop.battle_barrier("switch", digest, [index, selected], @scene)
     selected = packet["commands"][index / 2][1]
     raise AnilCoop::BattleStopped, "illegal replacement" unless selected >= 0 && pbCanSwitchIn?(index, selected)
+    AnilCoop.log("2v2 player replacement index=#{index} slot=#{selected}")
     selected
   end
 
+  def pbReplace(index, party_index, baton_pass = false)
+    AnilCoop.battle_phase("sendout_#{index}")
+    result = super
+    AnilCoop.log("2v2 sent out index=#{index} slot=#{party_index} turn=#{@turnCount}")
+    result
+  end
+
   def pbEndOfRoundPhase
+    AnilCoop.battle_phase("end_of_round")
     super
     AnilCoop.battle_barrier("state", coop_digest, nil, @scene)
   end
 
   def pbEndOfBattle
+    AnilCoop.battle_phase("end_of_battle")
     AnilCoop.battle_barrier("result", coop_digest, nil, @scene)
     coop_apply_reward_preview
     super

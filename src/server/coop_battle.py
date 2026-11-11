@@ -117,7 +117,34 @@ class BattleExchange:
         self.seq = 0
         self.pending = {}
         self.last_stage = None
-        self.deadline = time.monotonic() + 180
+        self.turn = 0
+        self.last_completed = time.monotonic()
+        self.last_attempt = {}
+
+    @staticmethod
+    def action_kind(command):
+        if command is None:
+            return "none"
+        if isinstance(command, list) and len(command) == 2 and all(type(x) is int for x in command):
+            return "switch"
+        if isinstance(command, list) and command and isinstance(command[0], str):
+            return command[0][:12]
+        if isinstance(command, list):
+            return "+".join(BattleExchange.action_kind(item) for item in command[:2])
+        return "invalid"
+
+    def diagnostic(self):
+        now = time.monotonic()
+        pending = [self.players.index(player) for player in self.pending]
+        stage = next(iter(self.pending.values()))["stage"] if self.pending else self.last_stage
+        return {"turn": self.turn, "seq": self.seq, "stage": stage,
+                "completed": self.last_stage,
+                "pending": pending, "awaiting": [i for i in range(2) if i not in pending],
+                "elapsed": round(now - self.last_completed, 1),
+                "last": [{"seq": entry["seq"], "stage": entry["stage"],
+                          "action": entry["action"], "age": round(now - entry["at"], 1)}
+                         if entry else None for entry in
+                         (self.last_attempt.get(0), self.last_attempt.get(1))]}
 
     def submit(self, player, message):
         """Return (error, complete packet). A duplicate never replaces an order."""
@@ -140,6 +167,10 @@ class BattleExchange:
         if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
             return "battle_digest", None
         owner_number = self.players.index(player)
+        self.last_attempt[owner_number] = {
+            "seq": message.get("seq") if type(message.get("seq")) is int else None,
+            "stage": stage if isinstance(stage, str) and len(stage) <= 12 else "invalid",
+            "action": self.action_kind(command), "at": time.monotonic()}
         owner = owner_number * 2
         owned_party = self.party_ranges[owner_number]
         if stage == "turn":
@@ -189,6 +220,7 @@ class BattleExchange:
                   "seed": secrets.randbelow(2**30)}
         self.seq += 1
         self.last_stage = stage
+        self.turn += 1 if stage == "turn" else 0
+        self.last_completed = time.monotonic()
         self.pending.clear()
-        self.deadline = time.monotonic() + 180
         return None, packet

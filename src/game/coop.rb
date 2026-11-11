@@ -408,6 +408,8 @@ module AnilCoop
       @trainer_states.delete([message["map"], message["event"]])
     when "battle_step", "battle_abort"
       battle_receive(message) if respond_to?(:battle_receive)
+    when "pong"
+      battle_wait_status(message) if respond_to?(:battle_wait_status)
     when "error"
       @connection_error = message["reason"]
       log("server error #{message["reason"]}")

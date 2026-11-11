@@ -50,12 +50,21 @@ module AnilCoopQA
         $player.badges[0] = false
         $game_switches[184] = false
         $game_switches[LevelCapsEX::LEVEL_CAP_BYPASS_SWITCH] = true unless story_defeat?
+        if ENV["ANIL_COOP_QA_BROCK_REPLACEMENTS"] == "1"
+          source = $player.party.fetch(0)
+          $player.party = Array.new(3) do |i|
+            pokemon = Marshal.load(Marshal.dump(source))
+            pokemon.personalID = (source.personalID + 30000 + i) % (2**32)
+            pokemon
+          end
+        end
         $player.party.each do |pkmn|
           pkmn.level = 35
           pkmn.moves = [Pokemon::Move.new(:WATERGUN)]
           pkmn.calc_stats
           pkmn.heal
         end unless story_defeat?
+        $player.party[0].hp = 1 if ENV["ANIL_COOP_QA_BROCK_REPLACEMENTS"] == "1"
       else
         $map_factory.setup(29) # The actual Oak-lab map, only in this QA process.
         $game_player.moveto(9, 14)
@@ -246,7 +255,8 @@ module AnilCoopQA
       $game_player.moveto($game_player.x, $game_player.y + delta)
       wait_until(12) do
         peer = AnilCoop.instance_variable_get(:@peers)[remote_id]
-        same_place = if story_brock? && result[:decision] == 2
+        same_place = if story_brock? && (result[:decision] == 2 ||
+                                        ENV["ANIL_COOP_QA_BROCK_REPLACEMENTS"] == "1")
           peer && peer.dig("position", "map") == $game_map.map_id
         else
           peer && peer.dig("position", "y") == remote_before["y"] + (3 - delta)
@@ -553,6 +563,20 @@ module AnilCoopQA
 
     def pbCommandMenu(index, first_action)
       raise AnilCoop::BattleStopped, "QA exceeded 35 turns" if @turnCount >= 35
+      if AnilCoopQA.story_brock? && ENV["ANIL_COOP_QA_DELAY"] &&
+         @coop_local == 2 && @turnCount == 1 && !@qa_delayed_menu
+        @qa_delayed_menu = true
+        delay = Integer(ENV["ANIL_COOP_QA_DELAY"])
+        raise "QA delay must be 1..150 seconds" unless (1..150).include?(delay)
+        AnilCoop.log("QA Brock delaying partner menu for #{delay} seconds")
+        started = System.uptime
+        while System.uptime - started < delay
+          Graphics.update
+          @scene.pbUpdate
+          AnilCoop.check_battle_transport!
+        end
+        qa_evidence[:delayed_menu_seconds] = (System.uptime - started).round
+      end
       if @turnCount == 0 && AnilCoopQA.scenario == "menu-disconnect"
         party = PokemonParty_Scene.new
         displayed = pbPlayerDisplayParty(index)
@@ -647,7 +671,8 @@ module AnilCoopQA
 
     def choose_team(event)
       return super unless ["personal-event", "story-gary", "story-brock"].include?(AnilCoopQA.scenario)
-      trainer_send("trainer_team", event, team: select_team([0]), trainer: trainer_snapshot)
+      slots = AnilCoopQA.story_brock? && ENV["ANIL_COOP_QA_BROCK_REPLACEMENTS"] == "1" ? [0, 1, 2] : [0]
+      trainer_send("trainer_team", event, team: select_team(slots), trainer: trainer_snapshot)
       true
     end
 
