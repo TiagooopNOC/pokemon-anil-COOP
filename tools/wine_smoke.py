@@ -41,6 +41,7 @@ def main() -> int:
     parser.add_argument("--qa-online", action="store_true", help="Check native ESC menu, loaded-game connection and regional map")
     parser.add_argument("--qa-online-team", action="store_true", help="Check live remote party in two native engines")
     parser.add_argument("--qa-online-invites", action="store_true", help="Check targeted invitations in two native engines")
+    parser.add_argument("--qa-trade-preview", action="store_true", help="Check visual trade negotiation without transfers")
     parser.add_argument("--qa-story-inspect", action="store_true", help="Inspect original rival events read-only")
     parser.add_argument("--play", action="store_true", help="Run until the player closes the game")
     parser.add_argument("--coop-battles", action="store_true")
@@ -66,7 +67,7 @@ def main() -> int:
         raise SafetyError("--qa-presence-labels needs --session and two clients")
     if args.qa_presence_followers and (not args.session or len(selected) != 2 or args.qa_presence or args.qa_presence_network or args.qa_presence_labels):
         raise SafetyError("--qa-presence-followers needs --session and two clients")
-    online_scenarios = sum((args.qa_online, args.qa_online_team, args.qa_online_invites))
+    online_scenarios = sum((args.qa_online, args.qa_online_team, args.qa_online_invites, args.qa_trade_preview))
     if online_scenarios and (args.session or selected != ["client03", "client04"] or online_scenarios != 1):
         raise SafetyError("Online QA needs client03 and client04, one scenario, no prestarted session")
     if args.client and args.clients:
@@ -115,6 +116,13 @@ def main() -> int:
         presence_result = profile / "qa-presence-result.json"
         if (args.qa_presence or args.qa_presence_network or args.qa_presence_labels or args.qa_presence_followers) and presence_result.exists():
             presence_result.rename(profile / "logs" / ("qa-presence-previous-" + uuid.uuid4().hex + ".json"))
+        online_report = ("qa-online-result.json" if args.qa_online else
+                         "qa-online-team-result.json" if args.qa_online_team else
+                         "qa-invites-result.json" if args.qa_online_invites else
+                         "qa-trade-preview-result.json" if args.qa_trade_preview else None)
+        if online_report and (profile / online_report).exists():
+            (profile / online_report).rename(
+                profile / "logs" / ("previous-" + uuid.uuid4().hex + "-" + online_report))
     slot_tool = args.gameslot.resolve()
     if not slot_tool.is_file():
         raise SafetyError("Reviewed GameSlot path is missing")
@@ -153,6 +161,7 @@ def main() -> int:
             run_env.pop("ANIL_COOP_ONLINE_QA", None)
             run_env.pop("ANIL_COOP_ONLINE_TEAM_QA", None)
             run_env.pop("ANIL_COOP_INVITE_QA", None)
+            run_env.pop("ANIL_COOP_TRADE_QA", None)
             run_env.pop("ANIL_COOP_ONLINE_QA_ROLE", None)
             if online_scenarios:
                 control = MenuControl(ROOT, server_port=17641)
@@ -164,7 +173,8 @@ def main() -> int:
                                ANIL_COOP_CONTROL_TOKEN=server.token,
                                ANIL_COOP_ONLINE_QA_ROLE="create" if client["client"] == "client03" else "join")
                 flag = ("ANIL_COOP_ONLINE_QA" if args.qa_online else
-                        "ANIL_COOP_ONLINE_TEAM_QA" if args.qa_online_team else "ANIL_COOP_INVITE_QA")
+                        "ANIL_COOP_ONLINE_TEAM_QA" if args.qa_online_team else
+                        "ANIL_COOP_INVITE_QA" if args.qa_online_invites else "ANIL_COOP_TRADE_QA")
                 run_env[flag] = "1"
             if args.coop_battles:
                 run_env.update(ANIL_COOP_BATTLES="1", ANIL_COOP_PERSONAL_TEAM="1")
@@ -248,6 +258,10 @@ def main() -> int:
             for observation, client in zip(observations, plan):
                 report = Path(client["save_directory"]).parent / "qa-invites-result.json"
                 observation["invite_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
+        if args.qa_trade_preview:
+            for observation, client in zip(observations, plan):
+                report = Path(client["save_directory"]).parent / "qa-trade-preview-result.json"
+                observation["trade_preview_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
         write_new(result_path, result)
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return 0 if all(item["bootstrap_observed"] and
@@ -256,6 +270,7 @@ def main() -> int:
                         (not args.qa_online or item["online_qa"]["pass"]) and
                         (not args.qa_online_team or item["online_team_qa"]["pass"]) and
                         (not args.qa_online_invites or item["invite_qa"]["pass"]) and
+                        (not args.qa_trade_preview or item["trade_preview_qa"]["pass"]) and
                         (not (args.qa_presence or args.qa_presence_network or args.qa_presence_labels or args.qa_presence_followers) or item["presence_qa"]["pass"])
                         for item in observations) else 2
     finally:

@@ -301,6 +301,7 @@ module AnilCoop
   end
 
   def self.disconnect
+    online_trade_disconnect if respond_to?(:online_trade_disconnect)
     online_invite_disconnect if respond_to?(:online_invite_disconnect)
     speed_disconnect if respond_to?(:speed_disconnect)
     @battle_failure = "connection lost" if @active_battle
@@ -430,6 +431,8 @@ module AnilCoop
       online_team_receive(message) if respond_to?(:online_team_receive)
     when "invite_offer", "invite_state"
       online_invite_receive(message) if respond_to?(:online_invite_receive)
+    when "trade_state", "trade_error"
+      online_trade_receive(message) if respond_to?(:online_trade_receive)
     when "trainer_state"
       @trainer_states[[message["map"], message["event"]]] = message
       log("trainer state map=#{message["map"]} event=#{message["event"]} phase=#{message["phase"]} players=#{message["participants"].length}")

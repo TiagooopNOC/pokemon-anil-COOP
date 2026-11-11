@@ -17,7 +17,7 @@ module AnilCoop
       status = message["status"]
       return if status == "pending"
       if (outgoing = @outgoing_invites.delete(request))
-        @invite_updates << [outgoing, status]
+        @invite_updates << [outgoing, status] unless outgoing[:kind] == "trade" && status == "accepted"
       end
       @incoming_invites.delete(request)
     end
@@ -37,7 +37,9 @@ module AnilCoop
     @outgoing_invites[request] = { peer: peer_id, kind: kind,
                                    name: @peers[peer_id]["name"].to_s }
     queue(type: "invite_request", request: request, target: peer_id, kind: kind)
-    pbMessage("Invitación de #{INVITE_NAMES[kind]} enviada. Aceptarla aún no inicia esa actividad.") { tick($scene) }
+    text = kind == "trade" ? "Invitación enviada. Al aceptarla podrán preparar el intercambio." :
+           "Invitación enviada. El combate PvP todavía no está disponible."
+    pbMessage(text) { tick($scene) }
   end
 
   def self.online_invite_cancel(request)
@@ -57,7 +59,7 @@ module AnilCoop
   end
 
   def self.online_invite_poll
-    return if @invite_modal || !connected? || !online_available? ||
+    return if @invite_modal || @trade_modal || !connected? || !online_available? ||
               ($game_temp.in_menu && !@online_screen_active) || $game_temp.message_window_showing ||
               $game_temp.player_transferring || @team_menu_active
     @incoming_invites ||= {}
@@ -72,7 +74,9 @@ module AnilCoop
         if @incoming_invites.delete(request) && @peers.key?(invite[:from])
           queue(type: "invite_reply", request: request, accept: choice == 0)
           if choice == 0
-            pbMessage("Aceptaste. Esta función todavía no está disponible.") { tick($scene) }
+            text = invite[:kind] == "trade" ? "Aceptaste. Se abrirá la preparación del intercambio." :
+                   "Aceptaste. El combate PvP todavía no está disponible."
+            pbMessage(text) { tick($scene) }
           end
         else
           pbMessage("La invitación ya no está disponible.") { tick($scene) }

@@ -71,7 +71,7 @@ module AnilCoop
       trade_request = online_invite_pending(peer_id, "trade")
       pvp_request = online_invite_pending(peer_id, "pvp")
       options = ["Ver equipo", "Ver ubicación",
-                 trade_request ? "Cancelar solicitud de intercambio" : "Solicitar intercambio",
+                 trade_request ? "Cancelar solicitud de intercambio" : "Intercambiar Pokémon",
                  pvp_request ? "Cancelar desafío" : "Desafiar a combate", "Volver"]
       choice = pbMessage(peer["name"], options, -1) { tick($scene) }
       return if choice < 0 || choice == 4

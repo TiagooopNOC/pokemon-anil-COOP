@@ -114,12 +114,12 @@ class AnilCoopOnlineScreen
       end
       actions = if @mode == :peer
                   [[:team, "Ver equipo"], [:location, "Ver ubicación"],
-                   [:trade, AnilCoop.online_invite_pending(@selected_peer, "trade") ? "Cancelar solicitud" : "Solicitar intercambio"],
+                   [:trade, AnilCoop.online_invite_pending(@selected_peer, "trade") ? "Cancelar solicitud" : "Intercambiar Pokémon"],
                    [:pvp, AnilCoop.online_invite_pending(@selected_peer, "pvp") ? "Cancelar desafío" : "Desafiar a combate"],
                    [:back_peer, "Volver a Online"]]
                 else
                   [[:players, "Jugadores conectados"], [:map, "Mapa regional"],
-                   [:teams, "Ver equipos"], [:trades, "Intercambios · invitaciones"],
+                   [:teams, "Ver equipos"], [:trades, "Intercambiar Pokémon"],
                    [:battles, "Combates PvP · invitaciones"]]
                 end
       actions.each_with_index { |entry, i| add(entry[0], entry[1], :actions, 264, 165 + i * 29, 232, 28) }
