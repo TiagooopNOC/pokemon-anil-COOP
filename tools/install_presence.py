@@ -52,6 +52,7 @@ def main():
         shutil.copy2(ROOT / "src/game/coop_menus.rb", game / "CoopDev/coop_menus.rb")
         shutil.copy2(ROOT / "src/game/coop_speed.rb", game / "CoopDev/coop_speed.rb")
         shutil.copy2(ROOT / "src/game/coop_title.rb", game / "CoopDev/coop_title.rb")
+        shutil.copy2(ROOT / "src/game/coop_online.rb", game / "CoopDev/coop_online.rb")
         shutil.copy2(ROOT / "src/game/menu_qa.rb", game / "CoopDev/menu_qa.rb")
         shutil.copy2(ROOT / "src/game/presence_qa.rb", game / "CoopDev/presence_qa.rb")
         shutil.copy2(ROOT / "src/game/story_qa.rb", game / "CoopDev/story_qa.rb")
