@@ -11,6 +11,7 @@ begin
   load "CoopDev/coop_menus.rb"
   load "CoopDev/coop_title.rb"
   load "CoopDev/coop_online.rb"
+  load "CoopDev/coop_online_screen.rb"
   load "CoopDev/coop_online_map.rb"
   load "CoopDev/coop_online_team.rb"
   load "CoopDev/coop_online_invites.rb"

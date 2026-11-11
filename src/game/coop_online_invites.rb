@@ -58,7 +58,7 @@ module AnilCoop
 
   def self.online_invite_poll
     return if @invite_modal || !connected? || !online_available? ||
-              $game_temp.in_menu || $game_temp.message_window_showing ||
+              ($game_temp.in_menu && !@online_screen_active) || $game_temp.message_window_showing ||
               $game_temp.player_transferring || @team_menu_active
     @incoming_invites ||= {}
     @invite_updates ||= []

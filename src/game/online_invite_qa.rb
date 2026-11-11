@@ -78,10 +78,11 @@ module AnilCoopInviteQA
       wait { !(AnilCoop.instance_variable_get(:@incoming_invites) || {}).key?(request) }
       $anil_invite_qa_visual = true
       request = "b" * 16
-      wait do
-        $anil_invite_qa_visual_seen &&
-          !(AnilCoop.instance_variable_get(:@incoming_invites) || {}).key?(request)
-      end
+      $game_temp.in_menu = true
+      AnilCoop.online_menu
+      $game_temp.in_menu = false
+      raise "invite was not displayed in Online" unless $anil_invite_qa_visual_seen &&
+        !(AnilCoop.instance_variable_get(:@incoming_invites) || {}).key?(request)
       $anil_invite_qa_visual = false
       request = "c" * 16
       wait { (AnilCoop.instance_variable_get(:@incoming_invites) || {}).key?(request) }
@@ -97,6 +98,7 @@ module AnilCoopInviteQA
     result = { pass: false, error: "#{e.class}: #{e.message}", trace: e.backtrace.first(6) }
   ensure
     $anil_invite_qa_visual = false
+    $game_temp.in_menu = false if $game_temp
     AnilCoop.menu_stop rescue nil
     File.write(File.join(AnilCoopDev::PROFILE, "qa-invites-result.json"), JSON.generate(result))
     exit
@@ -115,7 +117,13 @@ AnilCoop.singleton_class.prepend(AnilCoopInviteQAPoll)
 
 module AnilCoopInviteQAInput
   def trigger?(key)
-    if key == Input::USE && $anil_invite_qa_visual
+    if key == Input::BACK && $anil_invite_qa_visual
+      incoming = AnilCoop.instance_variable_get(:@incoming_invites) || {}
+      return $anil_invite_qa_visual_seen && !incoming.key?("b" * 16) &&
+             !AnilCoop.instance_variable_get(:@invite_modal)
+    end
+    if key == Input::USE && $anil_invite_qa_visual &&
+       AnilCoop.instance_variable_get(:@invite_modal)
       @anil_invite_qa_ready ||= Time.now.to_f + 0.7
       return false if Time.now.to_f < @anil_invite_qa_ready
       unless $anil_invite_qa_screenshot

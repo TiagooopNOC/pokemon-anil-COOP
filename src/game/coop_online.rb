@@ -16,51 +16,7 @@ module AnilCoop
       pbMessage("Para usar Online, abrí Pokémon Añil desde el lanzador Co-op.")
       return
     end
-    loop do
-      status = menu_request("status")
-      session = status["session"]
-      battle_tick
-      if connected? && session
-        names = @peers.values.map { |peer| peer["name"].to_s }.reject(&:empty?)
-        role = speed_host? ? "Anfitrión" : "Invitado"
-        text = "Online: servidor conectado | #{ENV['ANIL_COOP_NAME']} (#{role})\n" \
-               "Sala #{session['code']} | Jugadores: #{names.length + 1}\n" \
-               "Compañeros: #{names.empty? ? 'ninguno' : names.join(', ')}\n" \
-               "Velocidad ×#{@speed_battle_lock ? 1 : ($GameSpeed + 1)}"
-        options = ["Jugadores conectados", "Ver ubicación", "Ver equipo",
-                   "Solicitar intercambio", "Desafiar a combate",
-                   "Copiar invitación", "Desconectarse", "Volver"]
-        choice = pbMessage(text, options, -1) { tick($scene) }
-        case choice
-        when 0 then online_players
-        when 1 then online_locations
-        when 2, 3, 4 then online_players
-        when 5 then copy_room_data(session)
-        when 6
-          if confirm_online_disconnect
-            menu_stop
-            pbMessage("Te desconectaste. Tu partida sigue abierta.")
-          end
-        else return
-        end
-      else
-        text = session ? "Online: sin conexión. Podés reintentar sin salir de la partida." : "Online: desconectado."
-        options = ["Crear partida online", "Unirse a un amigo", "Pegar invitación"]
-        options << "Reintentar conexión" if session
-        options << "Volver"
-        choice = pbMessage(text, options, -1) { tick($scene) }
-        return if choice < 0 || choice == options.length - 1
-        begin
-          if session && choice == 3
-            menu_start(session["mode"], session["host"], session["code"])
-          else
-            online_connect_choice(choice, status)
-          end
-        rescue StandardError => e
-          pbMessage("Conexión: #{e.message}")
-        end
-      end
-    end
+    AnilCoopOnlineScreen.new.run
   rescue StandardError => e
     pbMessage("Online: #{e.message}")
   end
@@ -143,7 +99,14 @@ module AnilCoopDPPauseMenu
   def main
     unless @options.any? { |entry| entry[0] == "Online" }
       exit_index = @options.index { |entry| entry[0] == "Salir" } || @options.length
-      @options.insert(exit_index, ["Online", "controlesA", "controlesB", proc { AnilCoop.online_menu }])
+      @options.insert(exit_index, ["Online", "controlesA", "controlesB", proc {
+        @sprites.visible = false
+        begin
+          AnilCoop.online_menu
+        ensure
+          @sprites.visible = true unless @done
+        end
+      }])
       @count = @options.length
       @viewport.rect.height = 24 + 48 * @count
       @viewport.rect.y = -12 if @count >= 8
