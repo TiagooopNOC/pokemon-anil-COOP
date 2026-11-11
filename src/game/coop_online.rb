@@ -27,14 +27,15 @@ module AnilCoop
                "Sala #{session['code']} | Jugadores: #{names.length + 1}\n" \
                "Compañeros: #{names.empty? ? 'ninguno' : names.join(', ')}\n" \
                "Velocidad ×#{@speed_battle_lock ? 1 : ($GameSpeed + 1)}"
-        options = ["Jugadores conectados", "Ver ubicación", "Ver equipo (no disponible)",
+        options = ["Jugadores conectados", "Ver ubicación", "Ver equipo",
                    "Intercambiar Pokémon (no disponible)", "Desafiar a combate (no disponible)",
                    "Copiar invitación", "Desconectarse", "Volver"]
         choice = pbMessage(text, options, 7) { tick($scene) }
         case choice
         when 0 then online_players
         when 1 then online_locations
-        when 2, 3, 4 then pbMessage("Esta función todavía no está disponible.")
+        when 2 then online_players
+        when 3, 4 then pbMessage("Esta función todavía no está disponible.")
         when 5 then copy_room_data(session)
         when 6
           menu_stop
@@ -86,25 +87,45 @@ module AnilCoop
   end
 
   def self.online_players
-    if @peers.empty?
-      pbMessage("Conectado al servidor. No hay otros jugadores en la sala.")
-      return
+    loop do
+      if @peers.empty?
+        pbMessage("Conectado al servidor. No hay otros jugadores en la sala.")
+        return
+      end
+      peers = @peers.values
+      names = peers.map do |peer|
+        map = peer.dig("position", "map")
+        zone = map && GameData::MapMetadata.exists?(map) ? GameData::MapMetadata.get(map).name : "Ubicación no disponible"
+        "#{peer['name']} — conectado — #{zone}"
+      end
+      choice = pbMessage("Jugadores conectados", names + ["Volver"], names.length) { tick($scene) }
+      return if choice < 0 || choice >= peers.length
+      online_peer_menu(peers[choice]["id"])
     end
-    peers = @peers.values
-    names = peers.map do |peer|
-      map = peer.dig("position", "map")
-      zone = map && GameData::MapMetadata.exists?(map) ? GameData::MapMetadata.get(map).name : "Ubicación no disponible"
-      "#{peer['name']} — conectado — #{zone}"
-    end
-    choice = pbMessage("Jugadores conectados", names + ["Volver"], names.length) { tick($scene) }
-    return if choice < 0 || choice >= peers.length
-    peer = peers[choice]
-    option = pbMessage(peer["name"], ["Ver ubicación", "Ver equipo (no disponible)",
-                                        "Solicitar intercambio (no disponible)",
-                                        "Desafiar a combate (no disponible)", "Volver"], 4) { tick($scene) }
-    option == 0 ? online_locations(peer["id"]) : pbMessage("Esta función todavía no está disponible.") if option.between?(0, 3)
   end
 
+  def self.online_peer_menu(peer_id)
+    loop do
+      peer = @peers[peer_id]
+      unless peer
+        pbMessage("El compañero se desconectó.")
+        return
+      end
+      options = ["Ver equipo", "Ver ubicación", "Solicitar intercambio (no disponible)",
+                 "Desafiar a combate (no disponible)", "Volver"]
+      choice = pbMessage(peer["name"], options, 4) { tick($scene) }
+      return if choice < 0 || choice == 4
+      unless @peers.key?(peer_id)
+        pbMessage("El compañero se desconectó.")
+        return
+      end
+      case choice
+      when 0 then online_view_team(peer_id)
+      when 1 then online_locations(peer_id)
+      when 2, 3 then pbMessage("Esta función todavía no está disponible.")
+      end
+    end
+  end
 end
 
 module AnilCoopDPPauseMenu

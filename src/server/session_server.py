@@ -14,9 +14,9 @@ import threading
 import time
 
 if __package__:
-    from .coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, DIGEST, validate_team, validate_trainer
+    from .coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, DIGEST, validate_team, validate_trainer, validate_view_team
 else:
-    from coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, DIGEST, validate_team, validate_trainer
+    from coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, DIGEST, validate_team, validate_trainer, validate_view_team
 
 MAX_LINE = 32768  # Bounded personal-team snapshots; no binary game objects.
 MAX_PLAYERS = 4
@@ -24,6 +24,7 @@ VALID_CODE = re.compile(r"[A-Z0-9]{6,12}\Z")
 VALID_NAME = re.compile(r"[\w -]{1,24}\Z", re.UNICODE)
 VALID_SPRITE = re.compile(r"[\w -]{1,80}\Z", re.UNICODE)
 VALID_FOLLOWER_SPRITE = re.compile(r"Followers(?: shiny)?/[\w -]{1,80}\.png\Z", re.UNICODE)
+VALID_VIEW_REQUEST = re.compile(r"[a-f0-9]{16}\Z")
 FOLLOWER_KEYS = frozenset(("map", "x", "y", "direction", "pattern", "seq",
                            "hue", "speed", "sprite", "steps", "warp"))
 LOCAL_SECRET = "local-development-only"
@@ -66,6 +67,7 @@ class State:
                     if code in self.rooms:
                         return {"type": "error", "reason": "session_exists"}, None
                     self.rooms[code] = {"members": {}, "next_slot": 1, "trainers": {},
+                                        "view_requests": {},
                                         "host": None, "speed": 0}
                 room = self.rooms.get(code)
                 if not room:
@@ -107,6 +109,61 @@ class State:
             player = room["members"].get(player_id) if room else None
             if not player or player["sock"] is not sock:
                 return {"type": "error", "reason": "invalid_session"}, None
+            if kind.startswith("team_view_"):
+                pending = room["view_requests"]
+                now = time.monotonic()
+                for request_id, entry in list(pending.items()):
+                    if now - entry["created"] > 15:
+                        del pending[request_id]
+                request_id = message.get("request")
+                if not isinstance(request_id, str) or not VALID_VIEW_REQUEST.fullmatch(request_id):
+                    return {"type": "team_view_error", "request": request_id, "reason": "invalid_request"}, identity
+                if kind == "team_view_request":
+                    target = message.get("target")
+                    recipient = room["members"].get(target) if isinstance(target, str) else None
+                    if (message.keys() != {"type", "request", "target"} or not recipient or
+                            recipient["sock"] is None or target == player_id or
+                            request_id in pending or len(pending) >= 8):
+                        return {"type": "team_view_error", "request": request_id,
+                                "reason": "unavailable"}, identity
+                    pending[request_id] = {"from": player_id, "to": target, "created": now}
+                    try:
+                        self.send_one(recipient["sock"], {"type": "team_view_query",
+                                     "request": request_id, "from": player_id})
+                    except OSError:
+                        del pending[request_id]
+                        return {"type": "team_view_error", "request": request_id,
+                                "reason": "unavailable"}, identity
+                    return None, identity
+                entry = pending.get(request_id)
+                if kind == "team_view_cancel":
+                    if message.keys() != {"type", "request"} or not entry or entry["from"] != player_id:
+                        return {"type": "team_view_error", "request": request_id,
+                                "reason": "invalid_request"}, identity
+                    del pending[request_id]
+                    return None, identity
+                if kind == "team_view_reply":
+                    if not entry or entry["to"] != player_id:
+                        return {"type": "team_view_error", "request": request_id,
+                                "reason": "invalid_request"}, identity
+                    requester = room["members"].get(entry["from"])
+                    if message.keys() == {"type", "request", "reason"} and message["reason"] == "busy":
+                        packet = {"type": "team_view_error", "request": request_id, "reason": "busy"}
+                    elif message.keys() == {"type", "request", "team"} and validate_view_team(message["team"]):
+                        packet = {"type": "team_view_data", "request": request_id,
+                                  "from": player_id, "team": message["team"]}
+                    else:
+                        packet = {"type": "team_view_error", "request": request_id,
+                                  "reason": "invalid_team"}
+                    del pending[request_id]
+                    if requester and requester["sock"] is not None:
+                        try:
+                            self.send_one(requester["sock"], packet)
+                        except OSError:
+                            pass
+                    return None, identity
+                return {"type": "team_view_error", "request": request_id,
+                        "reason": "invalid_request"}, identity
             if kind in ("battle_step", "battle_abort"):
                 found = next(((k, e) for k, e in room["trainers"].items()
                               if e.get("battle") and e["battle"].id == message.get("battle")), None)
@@ -400,6 +457,10 @@ class State:
         self.broadcast(room, {"type": "trainer_closed", "map": encounter["map"], "event": encounter["event"]})
 
     @staticmethod
+    def send_one(sock, message):
+        sock.sendall((json.dumps(message, separators=(",", ":")) + "\n").encode())
+
+    @staticmethod
     def public(player):
         return {"id": player["id"], "slot": player["slot"], "name": player["name"],
                 "position": player["position"]}
@@ -424,6 +485,17 @@ class State:
             if player and player["sock"] is sock:
                 player["sock"] = None
                 player["position"] = None
+                for request_id, entry in list(room["view_requests"].items()):
+                    if player["id"] not in (entry["from"], entry["to"]):
+                        continue
+                    del room["view_requests"][request_id]
+                    requester = room["members"].get(entry["from"])
+                    if entry["to"] == player["id"] and requester and requester["sock"]:
+                        try:
+                            self.send_one(requester["sock"], {"type": "team_view_error",
+                                          "request": request_id, "reason": "peer_left"})
+                        except OSError:
+                            pass
                 active_speed = room["members"][room["host"]]["sock"] is not None and sum(
                     p["sock"] is not None for p in room["members"].values()) >= 2
                 self.broadcast(room, {"type": "leave", "id": player["id"],

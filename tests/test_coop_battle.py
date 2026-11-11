@@ -4,7 +4,7 @@ import unittest
 
 from src.server.session_server import State
 from src.server.coop_battle import (BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE,
-                                    validate_team, validate_trainer)
+                                    validate_team, validate_trainer, validate_view_team)
 
 
 def personal_trainer():
@@ -35,6 +35,20 @@ def personal_pokemon(slot=0):
                 ev=[0] * 6, maxed=[False] * 6, stats=[31, 20, 20, 20, 20, 20],
                 base_stats=[45, 49, 49, 65, 65, 45], types=["GRASS", "POISON"],
                 hp=31, status="NONE", status_count=0, happiness=70, pokerus=0, ball="POKEBALL")
+
+
+class ViewTeamValidationTests(unittest.TestCase):
+    def test_six_fainted_and_egg_without_relaxing_battle_snapshots(self):
+        team = [dict(personal_pokemon(i), egg_steps=0) for i in range(6)]
+        team[1]["hp"] = 0
+        team[2]["egg_steps"] = 1800
+        team[2]["moves"] = []
+        self.assertTrue(validate_view_team(team))
+        self.assertFalse(validate_team(team))
+        self.assertFalse(validate_view_team(team + [dict(personal_pokemon(5), egg_steps=0)]))
+        self.assertFalse(validate_view_team([dict(team[0], species="../../game")]))
+        self.assertFalse(validate_view_team([dict(team[0], hp=-1)]))
+        self.assertFalse(validate_view_team([dict(team[0], moves=[])]))
 
 
 class Peer:

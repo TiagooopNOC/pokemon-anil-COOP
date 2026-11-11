@@ -87,6 +87,26 @@ class SessionServerTests(unittest.TestCase):
                              "invalid_position")
         self.assertEqual(self.exchange(a, {"type": "position", "map": 1})["reason"], "invalid_position")
 
+    def test_on_demand_team_view_routes_by_session_id(self):
+        a, b = self.client(), self.client()
+        host = self.exchange(a, {"type": "create", "session": "VIEW01", "name": "same"})
+        guest = self.exchange(b, {"type": "join", "session": "VIEW01", "name": "same"})
+        self.receive(a)  # enter
+        request = {"type": "team_view_request", "request": "a" * 16, "target": guest["id"]}
+        a.sendall((json.dumps(request) + "\n").encode())
+        query = self.receive(b)
+        self.assertEqual((query["type"], query["from"]), ("team_view_query", host["id"]))
+        self.assertEqual(self.exchange(a, request)["reason"], "unavailable")
+        b.sendall((json.dumps({"type": "team_view_reply", "request": "a" * 16,
+                               "team": []}) + "\n").encode())
+        data = self.receive(a)
+        self.assertEqual((data["type"], data["from"], data["team"]),
+                         ("team_view_data", guest["id"], []))
+        a.sendall((json.dumps(dict(request, request="b" * 16)) + "\n").encode())
+        self.receive(b)
+        b.close()
+        self.assertEqual(self.receive(a)["reason"], "peer_left")
+
     def test_ordered_steps_and_warp_validation(self):
         sender, observer = self.client(), self.client()
         self.exchange(sender, {"type": "create", "session": "STEP01", "name": "one"})

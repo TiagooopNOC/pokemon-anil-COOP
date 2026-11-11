@@ -104,6 +104,35 @@ def validate_team(team, max_size=3):
     return True
 
 
+def validate_view_team(team):
+    """Validate a bounded, read-only party projection, including eggs and 0 HP.
+
+    Battle snapshots remain stricter. The view projection adds hatch steps and
+    permits empty move lists on eggs; it never becomes a battle participant.
+    """
+    if not isinstance(team, list) or len(team) > 6:
+        return False
+    if not team:
+        return True
+    normalized = []
+    for pokemon in team:
+        if not isinstance(pokemon, dict) or pokemon.keys() != SNAPSHOT_KEYS | {"egg_steps"}:
+            return False
+        steps = pokemon["egg_steps"]
+        if not _integer(steps, 0, 65535):
+            return False
+        if type(pokemon["hp"]) is not int or pokemon["hp"] < 0:
+            return False
+        if not isinstance(pokemon["moves"], list) or (not pokemon["moves"] and steps == 0):
+            return False
+        candidate = {key: value for key, value in pokemon.items() if key != "egg_steps"}
+        candidate["hp"] = max(1, pokemon["hp"])
+        if not candidate["moves"]:
+            candidate["moves"] = [["TACKLE", 0, 0]]
+        normalized.append(candidate)
+    return validate_team(normalized, max_size=6)
+
+
 class BattleExchange:
     def __init__(self, players, team_sizes=(2, 2)):
         if (len(players) != 2 or len(set(players)) != 2 or len(team_sizes) != 2 or

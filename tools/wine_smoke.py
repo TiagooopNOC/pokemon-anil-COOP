@@ -39,6 +39,7 @@ def main() -> int:
     parser.add_argument("--qa-presence-followers", action="store_true", help="Check native remote Pokemon followers in two engines")
     parser.add_argument("--qa-speed", action="store_true", help="Check native shared Q speed in two engines")
     parser.add_argument("--qa-online", action="store_true", help="Check native ESC menu, loaded-game connection and regional map")
+    parser.add_argument("--qa-online-team", action="store_true", help="Check live remote party in two native engines")
     parser.add_argument("--qa-story-inspect", action="store_true", help="Inspect original rival events read-only")
     parser.add_argument("--play", action="store_true", help="Run until the player closes the game")
     parser.add_argument("--coop-battles", action="store_true")
@@ -64,8 +65,9 @@ def main() -> int:
         raise SafetyError("--qa-presence-labels needs --session and two clients")
     if args.qa_presence_followers and (not args.session or len(selected) != 2 or args.qa_presence or args.qa_presence_network or args.qa_presence_labels):
         raise SafetyError("--qa-presence-followers needs --session and two clients")
-    if args.qa_online and (args.session or selected != ["client03", "client04"]):
-        raise SafetyError("--qa-online needs client03 and client04 without a prestarted session")
+    if (args.qa_online or args.qa_online_team) and (args.session or selected != ["client03", "client04"] or
+                                                  (args.qa_online and args.qa_online_team)):
+        raise SafetyError("Online QA needs client03 and client04, one scenario, no prestarted session")
     if args.client and args.clients:
         raise SafetyError("Choose --client or --clients")
     plan = launch_plan(ROOT, selected)["clients"]
@@ -148,16 +150,18 @@ def main() -> int:
             run_env.pop("ANIL_COOP_BATTLES", None)
             run_env.pop("ANIL_COOP_SPEED_QA", None)
             run_env.pop("ANIL_COOP_ONLINE_QA", None)
+            run_env.pop("ANIL_COOP_ONLINE_TEAM_QA", None)
             run_env.pop("ANIL_COOP_ONLINE_QA_ROLE", None)
-            if args.qa_online:
+            if args.qa_online or args.qa_online_team:
                 control = MenuControl(ROOT, server_port=17641)
                 server = ControlServer(control)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
                 controls.append((server, thread))
                 run_env.update(ANIL_COOP_MENU="1", ANIL_COOP_CONTROL_PORT=str(server.server_address[1]),
-                               ANIL_COOP_CONTROL_TOKEN=server.token, ANIL_COOP_ONLINE_QA="1",
+                               ANIL_COOP_CONTROL_TOKEN=server.token,
                                ANIL_COOP_ONLINE_QA_ROLE="create" if client["client"] == "client03" else "join")
+                run_env["ANIL_COOP_ONLINE_QA" if args.qa_online else "ANIL_COOP_ONLINE_TEAM_QA"] = "1"
             if args.coop_battles:
                 run_env.update(ANIL_COOP_BATTLES="1", ANIL_COOP_PERSONAL_TEAM="1")
             if args.personal_team or args.qa_scenario.startswith("personal") or args.qa_scenario in ("story-gary", "story-brock", "team-ui"):
@@ -232,12 +236,17 @@ def main() -> int:
             for observation, client in zip(observations, plan):
                 report = Path(client["save_directory"]).parent / "qa-online-result.json"
                 observation["online_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
+        if args.qa_online_team:
+            for observation, client in zip(observations, plan):
+                report = Path(client["save_directory"]).parent / "qa-online-team-result.json"
+                observation["online_team_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
         write_new(result_path, result)
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return 0 if all(item["bootstrap_observed"] and
                         (not args.qa_battle_bot or item["battle_qa"]["pass"]) and
                         (not args.qa_speed or item["speed_qa"]["pass"]) and
                         (not args.qa_online or item["online_qa"]["pass"]) and
+                        (not args.qa_online_team or item["online_team_qa"]["pass"]) and
                         (not (args.qa_presence or args.qa_presence_network or args.qa_presence_labels or args.qa_presence_followers) or item["presence_qa"]["pass"])
                         for item in observations) else 2
     finally:

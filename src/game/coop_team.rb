@@ -16,8 +16,8 @@ module AnilCoop
     p && p.able? && !p.egg? && !p.shadowPokemon? && !p.fused
   end
 
-  def self.team_snapshot(p, slot)
-    raise "Pokémon no utilizable" unless team_eligible?(p)
+  def self.team_snapshot(p, slot, allow_ineligible: false)
+    raise "Pokémon no utilizable" unless p && (allow_ineligible || team_eligible?(p))
     {
       "key" => pokemon_key(p), "slot" => slot, "species" => p.species.to_s,
       "name" => p.name, "level" => p.level, "exp" => p.exp, "form" => p.form,
@@ -34,6 +34,13 @@ module AnilCoop
       "hp" => p.hp, "status" => p.status.to_s, "status_count" => p.statusCount,
       "happiness" => p.happiness, "pokerus" => p.pokerus, "ball" => p.poke_ball.to_s
     }
+  end
+
+  def self.view_team_snapshot
+    raise "Partida no cargada" unless $player && $player.party.length <= 6
+    $player.party.each_with_index.map do |pokemon, slot|
+      team_snapshot(pokemon, slot, allow_ineligible: true).merge("egg_steps" => pokemon.steps_to_hatch)
+    end
   end
 
   def self.trainer_snapshot
@@ -85,6 +92,12 @@ module AnilCoop
     p.happiness = data["happiness"]
     p.pokerus = data["pokerus"]
     p.poke_ball = data["ball"].to_sym
+    p
+  end
+
+  def self.view_team_pokemon(data)
+    p = team_pokemon(data)
+    p.steps_to_hatch = data.fetch("egg_steps")
     p
   end
 

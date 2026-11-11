@@ -425,6 +425,8 @@ module AnilCoop
       speed_receive(message) if respond_to?(:speed_receive)
     when "speed_state"
       speed_receive(message) if respond_to?(:speed_receive)
+    when "team_view_query", "team_view_data", "team_view_error"
+      online_team_receive(message) if respond_to?(:online_team_receive)
     when "trainer_state"
       @trainer_states[[message["map"], message["event"]]] = message
       log("trainer state map=#{message["map"]} event=#{message["event"]} phase=#{message["phase"]} players=#{message["participants"].length}")
