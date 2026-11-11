@@ -35,6 +35,7 @@ def main() -> int:
     parser.add_argument("--qa-presence-network", action="store_true", help="Run ordered motion between two native engines")
     parser.add_argument("--qa-presence-labels", action="store_true", help="Check remote name labels in two native engines")
     parser.add_argument("--qa-presence-followers", action="store_true", help="Check native remote Pokemon followers in two engines")
+    parser.add_argument("--qa-speed", action="store_true", help="Check native shared Q speed in two engines")
     parser.add_argument("--qa-story-inspect", action="store_true", help="Inspect original rival events read-only")
     parser.add_argument("--play", action="store_true", help="Run until the player closes the game")
     parser.add_argument("--coop-battles", action="store_true")
@@ -139,6 +140,7 @@ def main() -> int:
             run_env.pop("ANIL_COOP_STORY_QA", None)
             run_env.pop("ANIL_COOP_PERSONAL_TEAM", None)
             run_env.pop("ANIL_COOP_BATTLES", None)
+            run_env.pop("ANIL_COOP_SPEED_QA", None)
             if args.coop_battles:
                 run_env.update(ANIL_COOP_BATTLES="1", ANIL_COOP_PERSONAL_TEAM="1")
             if args.personal_team or args.qa_scenario.startswith("personal") or args.qa_scenario in ("story-gary", "story-brock", "team-ui"):
@@ -153,6 +155,8 @@ def main() -> int:
                 run_env["ANIL_COOP_PRESENCE_QA"] = "labels"
             if args.qa_presence_followers:
                 run_env["ANIL_COOP_PRESENCE_QA"] = "followers"
+            if args.qa_speed:
+                run_env["ANIL_COOP_SPEED_QA"] = "1"
             if args.qa_story_inspect:
                 run_env["ANIL_COOP_STORY_QA"] = "inspect"
             if args.qa_2v2:
@@ -203,10 +207,15 @@ def main() -> int:
             for observation, client in zip(observations, plan):
                 report = Path(client["save_directory"]).parent / "qa-story-events.json"
                 observation["story_qa"] = {"maps": len(read_json(report).get("maps", []))} if report.is_file() else {"error": "missing result"}
+        if args.qa_speed:
+            for observation, client in zip(observations, plan):
+                report = Path(client["save_directory"]).parent / "qa-speed-result.json"
+                observation["speed_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
         write_new(result_path, result)
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return 0 if all(item["bootstrap_observed"] and
                         (not args.qa_battle_bot or item["battle_qa"]["pass"]) and
+                        (not args.qa_speed or item["speed_qa"]["pass"]) and
                         (not (args.qa_presence or args.qa_presence_network or args.qa_presence_labels or args.qa_presence_followers) or item["presence_qa"]["pass"])
                         for item in observations) else 2
     finally:

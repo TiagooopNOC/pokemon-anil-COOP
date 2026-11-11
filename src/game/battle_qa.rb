@@ -103,6 +103,13 @@ module AnilCoopQA
       peers = AnilCoop.instance_variable_get(:@peers)
       AnilCoop.connected? && peers.length == 1 && peers.values.all? { |p| p["position"].is_a?(Hash) }
     end
+    if story_brock? && ENV["ANIL_COOP_QA_SHARED_SPEED"] == "1"
+      if AnilCoop.speed_host?
+        AnilCoop.speed_set(2, cooperative: true)
+        AnilCoop.queue(type: "speed_set", speed: 2)
+      end
+      wait_until { AnilCoop.instance_variable_get(:@shared_speed) == 2 && $GameSpeed == 2 }
+    end
     if scenario == "team-ui"
       run_team_ui(path, before)
       return
@@ -213,6 +220,8 @@ module AnilCoopQA
     result[:connected_after] = AnilCoop.connected?
     result[:save_unchanged] = before == Digest::SHA256.file(path).hexdigest
     result[:scene_map] = $scene.is_a?(Scene_Map) && !$game_temp.in_battle
+    result[:speed_restored] = $GameSpeed == 2 && SPEEDUP_STAGES[2] == 3.0 if
+      story_brock? && ENV["ANIL_COOP_QA_SHARED_SPEED"] == "1"
     if result[:completed] && AnilCoop.personal_team?
       plan, party, decision, money = AnilCoop.instance_variable_get(:@last_personal_application)
       before_replay = Marshal.dump($player.party)
@@ -291,6 +300,8 @@ module AnilCoopQA
     result[:pass] = result[:completed] && result[:decision] == expected_decision &&
                     result[:connected_after] && result[:save_unchanged] && result[:scene_map] && result[:peer_visible_after]
     result[:pass] &&= result[:map_rendered] if visual
+    result[:pass] &&= result[:speed_restored] && result.dig(:observed, :speed_battle_locked) if
+      result.key?(:speed_restored)
     if AnilCoop.personal_team?
       result[:pass] &&= result.dig(:application, :applied) && result.dig(:application, :unselected_unchanged) &&
         result[:personal_replay_safe] && result[:personal_save_reload] && result[:reload_replay_safe]
@@ -563,6 +574,10 @@ module AnilCoopQA
 
     def pbCommandMenu(index, first_action)
       raise AnilCoop::BattleStopped, "QA exceeded 35 turns" if @turnCount >= 35
+      if AnilCoopQA.story_brock? && ENV["ANIL_COOP_QA_SHARED_SPEED"] == "1"
+        raise "co-op battle speed was not locked" unless $GameSpeed == 0 && !$CanToggle
+        qa_evidence[:speed_battle_locked] = true
+      end
       if AnilCoopQA.story_brock? && ENV["ANIL_COOP_QA_DELAY"] &&
          @coop_local == 2 && @turnCount == 1 && !@qa_delayed_menu
         @qa_delayed_menu = true

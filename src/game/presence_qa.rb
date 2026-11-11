@@ -1,6 +1,21 @@
 # Opt-in native-engine check of ordered remote steps. No saves or OS input.
 require "digest"
 module AnilCoopPresenceQA
+  def self.prepare_shared_speed
+    return unless ENV["ANIL_COOP_QA_SPEED_STAGE"] == "2"
+    if AnilCoop.speed_host?
+      AnilCoop.speed_set(2, cooperative: true)
+      AnilCoop.queue(type: "speed_set", speed: 2)
+    end
+    deadline = Time.now.to_f + 12
+    until AnilCoop.speed_active? && $GameSpeed == 2 &&
+          AnilCoop.instance_variable_get(:@shared_speed) == 2
+      Graphics.update
+      AnilCoop.tick($scene)
+      raise "shared speed QA deadline" if Time.now.to_f > deadline
+    end
+  end
+
   def self.followers_run
     save = File.join(AnilCoopDev::SAVE_DIR, "Partida 1.rxdata")
     before = Digest::SHA256.file(save).hexdigest
@@ -18,6 +33,7 @@ module AnilCoopPresenceQA
       break if AnilCoop.connected? && AnilCoop.instance_variable_get(:@peers).length == 1
       raise "follower peer timeout" if System.uptime > deadline
     end
+    prepare_shared_speed
     if sender
       $player.party << Pokemon.new(:BULBASAUR, 7) if !$player.first_able_pokemon
       event = RPG::Event.new($game_player.x - 1, $game_player.y)
@@ -78,8 +94,12 @@ module AnilCoopPresenceQA
           if previous
             dx, dy = (point[0] - previous[0]).abs, (point[1] - previous[1]).abs
             raise "diagonal follower frame" if dx > 0.001 && dy > 0.001
-            raise "follower teleported in frame" if dx > Game_Map::REAL_RES_X * 0.95 ||
-                                                 dy > Game_Map::REAL_RES_Y * 0.95
+            frame_limit = ENV["ANIL_COOP_QA_SPEED_STAGE"] == "2" ? 1.01 : 0.95
+            if dx > Game_Map::REAL_RES_X * frame_limit || dy > Game_Map::REAL_RES_Y * frame_limit
+              raise "follower teleported in frame dx=#{dx.round(1)} dy=#{dy.round(1)} " \
+                    "warp=#{remote.dig('position', 'follower', 'warp')} " \
+                    "steps=#{sent_steps&.length}"
+            end
             movement ||= dx > 0.001 || dy > 0.001
             partial ||= (dx > 0.001 && dx < Game_Map::REAL_RES_X * 0.5) ||
                         (dy > 0.001 && dy < Game_Map::REAL_RES_Y * 0.5)
@@ -191,6 +211,7 @@ module AnilCoopPresenceQA
       break if AnilCoop.connected? && peers.length == 1 && peers.values.first["position"]
       raise "peer connection timeout" if System.uptime > deadline
     end
+    prepare_shared_speed
     sender = ENV["ANIL_COOP_NAME"] == "client03"
     route = [[0.18, 6, 3.5], [0.36, 6, 3.5],
              [0.68, 4, 5.5], [0.725, 4, 5.5], [0.77, 4, 5.5],
@@ -237,7 +258,13 @@ module AnilCoopPresenceQA
       if previous
         dx, dy = (point[0] - previous[0]).abs, (point[1] - previous[1]).abs
         raise "diagonal visual frame" if dx > 0.001 && dy > 0.001
-        raise "teleport visual frame" if dx > Game_Map::REAL_RES_X * 0.95 || dy > Game_Map::REAL_RES_Y * 0.95
+        # At ×3, a running tile can legitimately finish within one rendered frame.
+        frame_limit = ENV["ANIL_COOP_QA_SPEED_STAGE"] == "2" ? 1.01 : 0.95
+        if dx > Game_Map::REAL_RES_X * frame_limit || dy > Game_Map::REAL_RES_Y * frame_limit
+          raise "teleport visual frame dx=#{dx.round(1)} dy=#{dy.round(1)} " \
+                "speed=#{$GameSpeed} warp=#{peer.dig('position', 'warp')} " \
+                "steps=#{peer.dig('position', 'steps')&.length} queue=#{character.instance_variable_get(:@remote_steps)&.length}"
+        end
         partial += 1 if (dx > 0.001 && dx < Game_Map::REAL_RES_X * 0.5) ||
                         (dy > 0.001 && dy < Game_Map::REAL_RES_Y * 0.5)
       end
@@ -248,7 +275,8 @@ module AnilCoopPresenceQA
     unless sender
       character = AnilCoop.instance_variable_get(:@sprites).values.first&.character
       raise "remote endpoint" unless character && character.x == expected_x && character.y == expected_y
-      raise "insufficient animation samples" unless samples > 30 && partial > 8
+      min_partial = ENV["ANIL_COOP_QA_SPEED_STAGE"] == "2" ? 0 : 8
+      raise "insufficient animation samples" unless samples > 30 && partial > min_partial
       raise "running steps not batched" unless seen_multi
     end
     raise "save changed" unless Digest::SHA256.file(save).hexdigest == before
