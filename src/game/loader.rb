@@ -16,6 +16,8 @@ begin
   load "CoopDev/coop_online_team.rb"
   load "CoopDev/coop_online_invites.rb"
   load "CoopDev/coop_trade.rb"
+  load "CoopDev/coop_trade_data.rb"
+  load "CoopDev/trade_data_qa.rb" if ENV["ANIL_COOP_TRADE_DATA_QA"] == "1"
   load "CoopDev/trade_preview_qa.rb" if ENV["ANIL_COOP_TRADE_QA"] == "1"
   load "CoopDev/online_invite_qa.rb" if ENV["ANIL_COOP_INVITE_QA"] == "1"
   load "CoopDev/online_team_qa.rb" if ENV["ANIL_COOP_ONLINE_TEAM_QA"] == "1"
