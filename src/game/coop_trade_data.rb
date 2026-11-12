@@ -110,6 +110,7 @@ module AnilCoopTradeData
                           else raw.is_a?(Hash) && raw["class"] == kind
                           end
       raise ArgumentError, "Invalid field type: #{key}" unless valid
+      check_plain(raw) if raw && %w[pairs array].include?(kind) && key != "moves"
     end
     species = symbol_field(fields, "species", GameData::Species)
     form = number_field(fields, "form", 0, 999)
@@ -330,6 +331,18 @@ module AnilCoopTradeData
       end
     else
       raise ArgumentError, "Unsupported record value"
+    end
+  end
+
+  # Container fields contain only JSON scalars, symbols and containers.
+  # A nested class record is accepted solely in owner, moves, mail or fusion.
+  def self.check_plain(node)
+    return unless node.is_a?(Hash)
+    raise ArgumentError, "Object in plain attribute" if node.key?("class")
+    if node.key?("array")
+      node["array"].each { |entry| check_plain(entry) }
+    elsif node.key?("pairs")
+      node["pairs"].each { |key, value| check_plain(key); check_plain(value) }
     end
   end
 

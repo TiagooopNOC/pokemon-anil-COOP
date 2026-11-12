@@ -52,6 +52,14 @@ module AnilCoopTradeDataQA
       raise "unknown field accepted"
     rescue ArgumentError
     end
+    nested_object = AnilCoopTradeData.pack(p)
+    nested_object["pokemon"]["fields"]["legacy_data"]["pairs"] <<
+      [{ "symbol" => "unexpected" }, nested_object["pokemon"]["fields"]["owner"]]
+    begin
+      AnilCoopTradeData.unpack(nested_object)
+      raise "object embedded in metadata accepted"
+    rescue ArgumentError
+    end
     incompatible = AnilCoopTradeData.pack(p)
     incompatible["effective"]["base_stats"][0] += 1
     begin
@@ -77,6 +85,7 @@ module AnilCoopTradeDataQA
     result = { pass: true, cases: cases, invalid_field_rejected: true,
                unknown_local_field_rejected: true, invalid_pp_rejected: true,
                incompatible_effective_stats_rejected: true,
+               nested_object_rejected: true,
                save_unchanged: true }
   rescue StandardError => e
     result = { pass: false, error: "#{e.class}: #{e.message}", trace: e.backtrace.first(7) }
