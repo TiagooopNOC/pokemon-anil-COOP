@@ -40,6 +40,11 @@ module AnilCoopTradeDataQA
     mixed.instance_variable_set(:@original_max_level, 50)
     mixed.instance_variable_set(:@mirrorherb_steps, 5)
     cases << roundtrip(mixed, "fusion_and_challenge_metadata")
+    letter = Pokemon.new(:BULBASAUR, 8, $player, true, false, false)
+    letter.item = :GRASSMAIL
+    letter.mail = Mail.new(:GRASSMAIL, "Prueba QA", "Amigo",
+                           [:BULBASAUR, 0, false, 0, false])
+    cases << roundtrip(letter, "mail_and_portrait")
     altered = AnilCoopTradeData.pack(p)
     altered["pokemon"]["fields"]["unexpected_extension"] = true
     begin

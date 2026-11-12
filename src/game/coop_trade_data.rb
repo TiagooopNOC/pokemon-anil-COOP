@@ -30,6 +30,24 @@ module AnilCoopTradeData
                     "Mail" => %w[item message sender poke1 poke2 poke3] }.freeze
   CLASSES = { "Pokemon" => Pokemon, "Move" => Pokemon::Move,
               "Owner" => Pokemon::Owner, "Mail" => Mail }.freeze
+  SHAPES = {
+    "symbol" => %w[species status ability nature nature_for_stats item poke_ball forced_ability],
+    "integer" => %w[form forced_form time_form_set exp level steps_to_hatch hp statusCount gender
+                    ability_index cool beauty cute smart tough sheen pokerus happiness obtain_method
+                    obtain_map obtain_level hatched_map timeReceived timeEggHatched personalID totalhp
+                    attack defense spatk spdef speed previous_form saved_exp heart_gauge
+                    heart_gauge_step_counter mirrorherb_steps cached_super_shiny_hue shiny_leaf
+                    original_max_level evo_recoil_count evo_step_count],
+    "boolean" => %w[shiny super_shiny shadow hyper_mode ready_to_evolve cannot_store
+                    cannot_release cannot_trade perma_faint traded randomized
+                    tradingCharmStatsIncreased expshare],
+    "string" => %w[name obtain_text],
+    "array" => %w[moves first_moves ribbons markings shadow_moves],
+    "pairs" => %w[iv ivMaxed ev evo_move_count evo_crest_count saved_ev spot_hash legacy_data primal],
+    "float" => %w[last_update_time],
+    "Owner" => %w[owner], "Mail" => %w[mail], "Pokemon" => %w[fused]
+  }.freeze
+  raise "Unclassified trade field" unless (FIELDS - SHAPES.values.flatten).empty?
   SYMBOL_PATTERN = /\A[A-Za-z][A-Za-z0-9_]{0,63}\z/
   STATS = %i[HP ATTACK DEFENSE SPECIAL_ATTACK SPECIAL_DEFENSE SPEED].freeze
 
@@ -79,6 +97,20 @@ module AnilCoopTradeData
     pokemon = value["pokemon"]
     raise ArgumentError, "Invalid Pokémon record" unless pokemon["class"] == "Pokemon"
     fields = pokemon["fields"]
+    fields.each do |key, raw|
+      kind = SHAPES.find { |_shape, names| names.include?(key) }&.first
+      valid = raw.nil? || case kind
+                          when "symbol" then raw.is_a?(Hash) && raw.keys == ["symbol"]
+                          when "integer" then raw.is_a?(Integer)
+                          when "boolean" then raw == true || raw == false
+                          when "string" then raw.is_a?(String)
+                          when "array" then raw.is_a?(Hash) && raw.keys == ["array"]
+                          when "pairs" then raw.is_a?(Hash) && raw.keys == ["pairs"]
+                          when "float" then raw.is_a?(Integer) || raw.is_a?(Float)
+                          else raw.is_a?(Hash) && raw["class"] == kind
+                          end
+      raise ArgumentError, "Invalid field type: #{key}" unless valid
+    end
     species = symbol_field(fields, "species", GameData::Species)
     form = number_field(fields, "form", 0, 999)
     raise ArgumentError, "Unknown species form" unless GameData::Species.get_species_form(species, form)
@@ -89,6 +121,7 @@ module AnilCoopTradeData
     number_field(fields, "happiness", 0, 255)
     number_field(fields, "pokerus", 0, 255)
     number_field(fields, "statusCount", 0, 1000)
+    number_field(fields, "shiny_leaf", 0, 6) if fields.key?("shiny_leaf")
     number_field(fields, "totalhp", 1, 100_000)
     raise ArgumentError, "HP exceeds maximum" if fields["hp"] > fields["totalhp"]
     if fields.key?("level") && !fields["level"].nil?
@@ -130,6 +163,31 @@ module AnilCoopTradeData
     markings = decode(fields.fetch("markings"))
     raise ArgumentError, "Invalid markings" unless markings.is_a?(Array) && markings.length <= 32 &&
       markings.all? { |v| v.is_a?(Integer) && v.between?(0, 15) }
+    %w[evo_move_count evo_crest_count saved_ev].each do |key|
+      next unless fields.key?(key) && fields[key]
+      values = decode(fields[key])
+      registry = key == "evo_move_count" ? GameData::Move :
+                 key == "evo_crest_count" ? GameData::Item : GameData::Stat
+      raise ArgumentError, "Invalid #{key}" unless values.is_a?(Hash) && values.length <= 1000 &&
+        values.all? { |id, count| id.is_a?(Symbol) && registry.exists?(id) &&
+          count.is_a?(Integer) && count.between?(0, 10_000) }
+    end
+    if fields.key?("shadow_moves") && fields["shadow_moves"]
+      shadow_moves = decode(fields["shadow_moves"])
+      raise ArgumentError, "Invalid shadow moves" unless shadow_moves.is_a?(Array) &&
+        shadow_moves.length <= 2 * Pokemon::MAX_MOVES &&
+        shadow_moves.all? { |id| id.nil? || (id.is_a?(Symbol) && GameData::Move.exists?(id)) }
+    end
+    if fields.key?("legacy_data") && fields["legacy_data"]
+      legacy = decode(fields["legacy_data"])
+      allowed = %i[party_time item_count move_count egg_count trade_count defeated_count
+                   fainted_count supereff_count critical_count retreat_count trainer_count
+                   leader_count legend_count champion_count loss_count]
+      raise ArgumentError, "Invalid Legacy Data" unless legacy.is_a?(Hash) &&
+        (legacy.keys - allowed).empty? && legacy.all? { |k, v|
+          k == :party_time ? v.is_a?(Numeric) && v.finite? && v.between?(0, 10**12) :
+                             v.is_a?(Integer) && v.between?(0, 10**9) }
+    end
     moves = fields.fetch("moves")
     raise ArgumentError, "Invalid moves" unless moves.is_a?(Hash) &&
       moves["array"].is_a?(Array) && moves["array"].length <= Pokemon::MAX_MOVES
@@ -152,6 +210,23 @@ module AnilCoopTradeData
       mail = fields["mail"]
       raise ArgumentError, "Invalid mail" unless mail.is_a?(Hash) && mail["class"] == "Mail"
       symbol_field(mail["fields"], "item", GameData::Item)
+      raise ArgumentError, "Mail item does not match held item" unless
+        fields["item"] == mail["fields"]["item"]
+      %w[message sender].each do |key|
+        text = mail["fields"][key]
+        raise ArgumentError, "Invalid mail #{key}" unless text.is_a?(String) &&
+          text.bytesize <= (key == "message" ? 1000 : 100)
+      end
+      %w[poke1 poke2 poke3].each do |key|
+        next if mail["fields"][key].nil?
+        icon = decode(mail["fields"][key])
+        raise ArgumentError, "Invalid mail portrait" unless icon.is_a?(Array) &&
+          icon.length.between?(5, 6) && icon[0].is_a?(Symbol) &&
+          GameData::Species.exists?(icon[0]) && [0, 1].include?(icon[1]) &&
+          [true, false].include?(icon[2]) && icon[3].is_a?(Integer) &&
+          icon[3].between?(0, 999) && [true, false].include?(icon[4]) &&
+          (icon.length == 5 || icon[5] == true)
+      end
     end
     if fields["fused"]
       fused = fields["fused"]
