@@ -47,6 +47,13 @@ module AnilCoopTradeDataQA
       raise "unknown field accepted"
     rescue ArgumentError
     end
+    incompatible = AnilCoopTradeData.pack(p)
+    incompatible["effective"]["base_stats"][0] += 1
+    begin
+      AnilCoopTradeData.unpack(incompatible)
+      raise "incompatible effective stats accepted"
+    rescue ArgumentError
+    end
     unknown = Pokemon.new(:BULBASAUR, 5, $player, true, false, false)
     unknown.instance_variable_set(:@future_plugin_field, 123)
     begin
@@ -64,6 +71,7 @@ module AnilCoopTradeDataQA
     raise "QA save changed" unless Digest::SHA256.file(save).hexdigest == original_hash
     result = { pass: true, cases: cases, invalid_field_rejected: true,
                unknown_local_field_rejected: true, invalid_pp_rejected: true,
+               incompatible_effective_stats_rejected: true,
                save_unchanged: true }
   rescue StandardError => e
     result = { pass: false, error: "#{e.class}: #{e.message}", trace: e.backtrace.first(7) }

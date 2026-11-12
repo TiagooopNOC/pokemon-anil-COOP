@@ -31,10 +31,22 @@ module AnilCoopTradeData
   CLASSES = { "Pokemon" => Pokemon, "Move" => Pokemon::Move,
               "Owner" => Pokemon::Owner, "Mail" => Mail }.freeze
   SYMBOL_PATTERN = /\A[A-Za-z][A-Za-z0-9_]{0,63}\z/
+  STATS = %i[HP ATTACK DEFENSE SPECIAL_ATTACK SPECIAL_DEFENSE SPEED].freeze
+
+  def self.effective(pokemon)
+    { "types" => pokemon.types.map(&:to_s),
+      "base_stats" => STATS.map { |stat| pokemon.baseStats.fetch(stat) },
+      "ability" => pokemon.ability_id&.to_s,
+      "stats" => [pokemon.totalhp, pokemon.attack, pokemon.defense,
+                  pokemon.spatk, pokemon.spdef, pokemon.speed] }
+  end
 
   def self.pack(pokemon)
     raise ArgumentError, "Not a Pokémon" unless pokemon.instance_of?(Pokemon)
-    value = { "version" => VERSION, "pokemon" => encode(pokemon) }
+    # Several native getters lazily cache values. Evaluate on a trusted local
+    # copy so building an offer never changes the player's live Pokémon.
+    behavior = effective(Marshal.load(Marshal.dump(pokemon)))
+    value = { "version" => VERSION, "pokemon" => encode(pokemon), "effective" => behavior }
     validate(value)
     value
   end
@@ -48,11 +60,22 @@ module AnilCoopTradeData
 
   def self.validate(value)
     raise ArgumentError, "Invalid trade data version" unless value.is_a?(Hash) &&
-      value.keys.sort == %w[pokemon version] && value["version"] == VERSION
+      value.keys.sort == %w[effective pokemon version] && value["version"] == VERSION
     json = JSON.generate(value)
     raise ArgumentError, "Trade data too large" if json.bytesize > MAX_BYTES
     count = [0]
     check_node(value["pokemon"], 0, count)
+    behavior = value["effective"]
+    raise ArgumentError, "Invalid effective attributes" unless behavior.is_a?(Hash) &&
+      behavior.keys.sort == %w[ability base_stats stats types] &&
+      behavior["types"].is_a?(Array) && behavior["types"].length.between?(1, 2) &&
+      behavior["types"].all? { |t| t.is_a?(String) && GameData::Type.exists?(t) } &&
+      behavior["base_stats"].is_a?(Array) && behavior["base_stats"].length == 6 &&
+      behavior["base_stats"].all? { |n| n.is_a?(Integer) && n.between?(1, 1000) } &&
+      behavior["stats"].is_a?(Array) && behavior["stats"].length == 6 &&
+      behavior["stats"].all? { |n| n.is_a?(Integer) && n.between?(1, 100_000) } &&
+      (behavior["ability"].nil? ||
+       (behavior["ability"].is_a?(String) && GameData::Ability.exists?(behavior["ability"])))
     pokemon = value["pokemon"]
     raise ArgumentError, "Invalid Pokémon record" unless pokemon["class"] == "Pokemon"
     fields = pokemon["fields"]
@@ -134,7 +157,9 @@ module AnilCoopTradeData
       fused = fields["fused"]
       raise ArgumentError, "Invalid fusion" unless fused.is_a?(Hash) && fused["class"] == "Pokemon" &&
         fused["fields"]["fused"].nil?
-      validate("version" => VERSION, "pokemon" => fused)
+      # A fused Pokémon is bounded to one extra level and validated separately.
+      nested = decode(fused)
+      validate("version" => VERSION, "pokemon" => fused, "effective" => effective(nested))
     end
     true
   end
