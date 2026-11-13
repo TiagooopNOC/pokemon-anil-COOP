@@ -7,13 +7,14 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import filedialog
 
 if not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.server import session_server
 from tools.h0 import ROOT, SafetyError, no_links
+from tools.launcher_view import AdventureView
 from tools.windows_install import install, installed_client, play
 
 
@@ -39,59 +40,18 @@ class Launcher:
         self.busy = None
         self.close_after_play = False
         self.retry_action = None
-        root.title(TITLE)
-        root.minsize(530, 355)
-        root.configure(background="#101b30")
         root.protocol("WM_DELETE_WINDOW", self.close)
-
-        style = ttk.Style(root)
-        style.theme_use("clam")
-        style.configure("Launcher.Horizontal.TProgressbar", troughcolor="#253955",
-                        background="#69dfbe", borderwidth=0, thickness=10)
-        style.configure("Play.TButton", font=("Segoe UI", 15, "bold"), padding=(24, 12),
-                        background="#69dfbe", foreground="#102538", borderwidth=0)
-        style.map("Play.TButton", background=[("disabled", "#253955"), ("active", "#a0f4d8")],
-                  foreground=[("disabled", "#9cacc4")])
-        style.configure("Setup.TButton", font=("Segoe UI", 10), padding=(12, 7))
-
-        body = tk.Frame(root, background="#101b30", padx=30, pady=24)
-        body.pack(fill="both", expand=True)
-        tk.Label(body, text=TITLE, font=("Segoe UI", 24, "bold"), fg="#f6f9ff",
-                 bg="#101b30", anchor="w").pack(fill="x")
-        self.status = tk.Label(body, font=("Segoe UI", 11, "bold"), fg="#69dfbe",
-                               bg="#101b30", anchor="w")
-        self.status.pack(fill="x", pady=(12, 7))
-        self.detail = tk.Label(body, font=("Segoe UI", 10), fg="#d4e2f7", bg="#101b30",
-                               justify="left", anchor="nw", wraplength=465, height=3)
-        self.detail.pack(fill="x")
-        self.bar = ttk.Progressbar(body, style="Launcher.Horizontal.TProgressbar")
-        self.bar.pack(fill="x", pady=(4, 18))
-        buttons = tk.Frame(body, background="#101b30")
-        buttons.pack(fill="x")
-        self.select = ttk.Button(buttons, text="Seleccionar carpeta original",
-                                 style="Setup.TButton", command=self.choose)
-        self.select.pack(side="left")
-        self.retry = ttk.Button(buttons, text="Reintentar", style="Setup.TButton",
-                                command=lambda: self.retry_action())
-        self.retry.pack(side="left", padx=(10, 0))
-        self.start = ttk.Button(body, text="JUGAR", style="Play.TButton", command=self.play)
-        self.start.pack(fill="x", side="bottom", pady=(18, 0))
+        self.view = AdventureView(root, ROOT / "assets/windows-launcher", TITLE,
+                                  self.choose, lambda: self.retry_action(), self.play)
 
         self.check()
         root.after(40, self.poll)
 
     def render(self, status, detail, percent=0, retry=None):
-        self.status.configure(text=status)
-        self.detail.configure(text=detail)
-        self.bar.configure(value=percent)
-        self.select.configure(state="disabled" if self.busy or self.client else "normal")
-        self.start.configure(state="normal" if self.client and not self.busy else "disabled")
         self.retry_action = retry
-        self.retry.configure(state="normal" if retry else "disabled")
-        if retry:
-            self.retry.pack(side="left", padx=(10, 0))
-        else:
-            self.retry.pack_forget()
+        self.view.render(status, detail, installing=self.busy == "install", percent=percent,
+                         selectable=not self.busy and not self.client,
+                         playable=bool(self.client and not self.busy), retryable=retry is not None)
 
     def check(self):
         self.run("checking", lambda _: installed_client(self.data, ROOT))
@@ -161,16 +121,16 @@ class Launcher:
                 self.client = value
             if self.client:
                 detail = "Instalación completada. Ya podés jugar." if operation == "install" else "Tu copia de Pokémon Añil Co-op está lista."
-                self.render("Listo", detail, 100)
-                self.start.focus_set()
+                self.render("Listo para jugar", detail)
+                self.view.start.focus_set()
             else:
                 self.render("No instalado", "Seleccioná la carpeta que contiene el Game.exe de tu Pokémon Añil v4.14.")
-                self.select.focus_set()
+                self.view.select.focus_set()
         self.root.after(40, self.poll)
 
     def close(self):
         if self.busy == "install":
-            self.detail.configure(text="Esperá a que termine la instalación antes de cerrar. Podés minimizar esta ventana.")
+            self.view.detail.configure(text="Esperá a que termine la instalación antes de cerrar. Podés minimizar esta ventana.")
         elif self.busy == "play":
             self.close_after_play = True
             self.root.withdraw()

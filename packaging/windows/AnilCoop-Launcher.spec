@@ -5,10 +5,15 @@ root = Path(SPECPATH).resolve().parents[1]
 sys.path.insert(0, str(root))
 from tools.install_presence import GAME_SCRIPTS
 
+artwork = root / "assets/windows-launcher"
 assets = [
     (str(root / "config/build.json"), "config"),
     (str(root / "src/bootstrap/isolate.rb"), "src/bootstrap"),
     *((str(root / "src/game" / script), "src/game") for script in GAME_SCRIPTS),
+    *((str(artwork / name), "assets/windows-launcher")
+      for name in ("panorama.png", "corner-left.png", "corner-right.png")),
+    *((str(artwork / name), "assets/windows-launcher")
+      for name in ("pikachu-ash.png", "eevee.png") if (artwork / name).is_file()),
 ]
 
 analysis = Analysis(

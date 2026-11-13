@@ -5,7 +5,7 @@
 1. Extraé todo `AnilCoop-Launcher-win-x64.zip` y abrí `AnilCoop-Launcher.exe`.
 2. Elegí la carpeta de tu Pokémon Añil v4.14 que contiene `Game.exe`.
 3. La barra muestra los archivos procesados y el porcentaje de la etapa actual.
-   Cuando aparezca **Listo**, presioná **JUGAR**.
+   Cuando aparezca **Listo para jugar**, presioná **JUGAR**.
 4. Cargá o empezá una partida. Usá **ESC → Online** para crear una sala o unirte
    por LAN o VPN privada. Podés minimizar el launcher mientras jugás.
 
@@ -41,6 +41,16 @@ PyInstaller de carpeta única y subsistema gráfico. El EXE carga el runtime y
 los archivos del mod desde `_internal`. El script imprime el SHA-256 del ZIP.
 El paquete se compila desde una lista explícita de recursos del mod.
 [Documentación de PyInstaller](https://pyinstaller.org/en/stable/usage.html).
+
+## Arte del launcher
+
+El paisaje nocturno y la vegetación de las esquinas se dibujaron para este
+launcher. La escena mantiene su proporción al cambiar el tamaño de la ventana.
+El panel reserva un lugar a cada lado de **JUGAR**. Para incluir sprites propios
+o autorizados, guardá PNG transparentes como `pikachu-ash.png` y `eevee.png` en
+`assets/windows-launcher/` antes de compilar. PyInstaller los incluye si existen.
+También podés agregarlos a `_internal/assets/windows-launcher/` dentro del
+paquete extraído.
 
 ## Integración
 
