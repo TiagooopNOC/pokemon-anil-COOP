@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 if not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -15,6 +15,7 @@ if not getattr(sys, "frozen", False):
 from src.server import session_server
 from tools.h0 import ROOT, SafetyError, no_links
 from tools.launcher_view import ClassicMenuView
+from tools.save_import_view import SaveImportDialog
 from tools.windows_install import install, installed_client, play
 
 
@@ -42,7 +43,7 @@ class Launcher:
         self.retry_action = None
         root.protocol("WM_DELETE_WINDOW", self.close)
         self.view = ClassicMenuView(root, ROOT / "assets/windows-launcher", TITLE,
-                                    self.choose, lambda: self.retry_action(), self.play)
+                                    self.choose, lambda: self.retry_action(), self.play, self.open_import)
 
         self.check()
         root.after(40, self.poll)
@@ -51,7 +52,17 @@ class Launcher:
         self.retry_action = retry
         self.view.render(status, detail, installing=self.busy == "install", percent=percent,
                          selectable=not self.busy and not self.client,
-                         playable=bool(self.client and not self.busy), retryable=retry is not None)
+                         playable=bool(self.client and not self.busy), retryable=retry is not None,
+                         idle=not self.busy)
+
+    def open_import(self):
+        if self.busy:
+            return
+        if not self.client:
+            messagebox.showinfo(TITLE, "Primero completá la instalación de Pokémon Añil Co-op.",
+                                parent=self.root)
+            return
+        SaveImportDialog(self.root, self.view, self.data, ROOT, self.client)
 
     def check(self):
         self.run("checking", lambda _: installed_client(self.data, ROOT))

@@ -192,3 +192,18 @@ module AnilCoopTitleMenu
 end
 
 PokemonLoad_Scene.prepend(AnilCoopTitleMenu)
+
+# Multi Save stores the old manual slot inside Player. An imported file may
+# have been placed in a different slot to preserve an existing Co-op save.
+module AnilCoopManualSaveSlot
+  def load_save_file(file_path)
+    data = super
+    slot = File.basename(file_path, ".rxdata")
+    if slot.match?(/\APartida [0-9]+\z/) && data.is_a?(Hash) && data[:player]
+      data[:player].save_slot = slot
+    end
+    data
+  end
+end
+
+PokemonLoadScreen.prepend(AnilCoopManualSaveSlot)

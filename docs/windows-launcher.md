@@ -25,6 +25,33 @@ publicados. Si detecta partidas en una preparación interrumpida, conserva tambi
 esa carpeta. Los detalles de los errores quedan en
 `%LOCALAPPDATA%\AnilCoop\launcher.log`.
 
+## Importar una partida existente
+
+1. Cerrá el juego de origen y completá la instalación de Co-op.
+2. En el launcher, pulsá **Importar partida guardada**. Si existe
+   `%APPDATA%\Pokemon Anil`, el asistente revisa esa carpeta. También podés
+   elegir un archivo o una carpeta, por ejemplo `profile\saves` de otra copia Co-op.
+3. Elegí una partida compatible y pulsá **Importar**. Ante un conflicto, podés
+   elegir una ranura libre, cancelar o confirmar el reemplazo con respaldo.
+4. Pulsá **JUGAR** y elegí la ranura importada en la pantalla de carga.
+   Podés recorrer las ranuras con las flechas izquierda y derecha.
+
+Se admiten `Partida N.rxdata`, `Auto 1.rxdata` a `Auto 3.rxdata`,
+`BackupNNN.rxdata`, `Game.rxdata` y sus variantes `.bak`, siempre que tengan
+una estructura reconocida y las versiones internas de la edición compatible
+de Añil v4.14 (Essentials 21.1, versión de guardado 4.1.1). Se copian a una
+ranura manual. Se rechazan otros nombres, estructuras, versiones y archivos
+mayores de 32 MiB. El importador inspecciona Ruby Marshal sin instanciar sus
+objetos. Importá partidas propias. [Formato Ruby Marshal](https://docs-origin.ruby-lang.org/en/master/language/marshal_rdoc.html).
+
+La copia conserva los bytes originales y se verifica antes de publicarla.
+Co-op usa la ranura del archivo al cargarlo para que el siguiente guardado
+escriba en la ranura elegida. Si confirmás un reemplazo, el archivo anterior se
+conserva en `profile\save-import-backups`. Podés recuperar el respaldo
+seleccionándolo como archivo en el mismo asistente. El bloqueo del perfil impide
+importar mientras esa copia Co-op está abierta. Si aparecen archivos de estado de
+intercambio en el perfil, el asistente pausa la importación.
+
 ## Compilar y distribuir
 
 Desde la raíz del repositorio en Windows x64, con CPython 3.12 x64 y Tcl/Tk
