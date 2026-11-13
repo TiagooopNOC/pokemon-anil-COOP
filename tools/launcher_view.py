@@ -48,6 +48,8 @@ class ClassicMenuView:
 
         panel = self.frame(body, PANEL, self.px(4))
         panel.grid(row=0, column=1, sticky="nsew")
+        # Wrapped text must not resize the grid column that sets its wrap width.
+        panel.grid_propagate(False)
         panel.columnconfigure(0, weight=1)
         panel.rowconfigure(6, weight=1)
         inset = self.px(17)
