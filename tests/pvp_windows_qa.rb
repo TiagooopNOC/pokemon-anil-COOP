@@ -4,21 +4,24 @@ module AnilPvpQaMessages
 end
 Battle::Scene.prepend(AnilPvpQaMessages)
 class AnilCoopDuel
-  def choose_local_order
+  def pbCommandMenu(*)
+    return 2 if ENV["ANIL_PVP_QA_MODE"] == "switch" && @turnCount == 0 && @client_id == 1
+    0
+  end
+
+  def pbFightMenu(index)
     AnilCoop.log("PvP QA input #{@turnCount}")
-    return ["none", 0, -1] unless pbCanShowCommands?(0)
     if ENV["ANIL_PVP_QA_MODE"] == "disconnect" && @client_id == 1 && @turnCount >= 1
       AnilCoop.disconnect
       raise AnilCoop::BattleStopped, 'QA transport closed'
     end
-    if ENV["ANIL_PVP_QA_MODE"] == "switch" && @turnCount == 0 && @client_id == 1
-      return ["switch", 1, -1]
-    end
-    return ["move", 1, -1] if @turnCount == 1
-    ["move", 0, -1]
+    pbRegisterMove(index, @turnCount == 1 ? 1 : 0)
   end
-  def pbPartyScreen(index, *args)
-    (0...pbParty(index).length).find { |slot| pbCanSwitchIn?(index, slot) } || -1
+
+  def pbPartyScreen(index, _check_lax = false, _can_cancel = false, register = false)
+    selected = (0...pbParty(index).length).find { |slot| pbCanSwitchIn?(index, slot) } || -1
+    pbRegisterSwitch(index, selected) if register && selected >= 0
+    selected
   end
   def pbDisplayPaused(message, &block); @scene.pbDisplayMessage(message, &block); end
 end
@@ -103,6 +106,11 @@ trace = TracePoint.new(:return) do |event|
       wait.call do
         AnilCoop.tick($scene)
         AnilCoop.instance_variable_get(:@peers).dig(remote, "position", "seq").to_i > previous
+      end
+      until_time = System.uptime + 1
+      while System.uptime < until_time
+        AnilCoop.tick($scene)
+        Graphics.update
       end
       report[:position_after] = true
     end

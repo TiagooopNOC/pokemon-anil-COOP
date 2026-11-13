@@ -16,10 +16,10 @@ py -3 -B tools/launch_menu.py
 2. Seleccioná a tu compañero en **Jugadores conectados** y elegí
    **Desafiar a combate**. El invitado elige **Aceptar** o **Rechazar**.
 3. Ambos agregan de uno a seis Pokémon aptos, ordenan la selección y
-   confirman con **Listo**. El primer seleccionado sale primero. **Datos**
+   confirman con **Confirmar** para quedar listos. El primer seleccionado sale primero. **Datos**
    abre el resumen nativo.
 4. Elegí los ataques y cambios desde el menú de combate. El otro jugador
-   elige las órdenes de su lado. Para rendirte usá la opción de huir.
+   elige las órdenes de su lado. **Rendirse** pide confirmación.
 5. Tras el resultado, ambos vuelven al mapa. El duelo usa copias temporales
    y no concede recompensas. Guardá desde el mapa si querés continuar.
 

@@ -53,6 +53,11 @@ class AnilCoopDuel < Battle_CableClub
     false
   end
 
+  def pbCommandMenu(index, _first_action)
+    @scene.pbCommandMenuEx(index, ["¿Qué debería\nhacer #{@battlers[index].name}?",
+                                  "Luchar", "Mochila", "Pokémon", "Rendirse"], 0)
+  end
+
   def pbRunMenu(*)
     return false unless pbConfirmMessageSerious("¿Querés rendirte?")
     @forfeit = true
@@ -246,6 +251,7 @@ module AnilCoop
 
   def self.run_duel(offer)
     @pvp_running = true
+    @last_pvp_result = nil
     @active_battle = offer.fetch("battle")
     @battle_seq = 0
     @battle_completed = @battle_cleanup = false
