@@ -12,13 +12,29 @@ class AnilCoopDuelSelection < AnilCoopTeamSelection
   end
 end
 
-module AnilCoopDuelMenuTransport
+module AnilCoopDuelTransport
   def update_battle_menu
     super
     check_battle_transport! if @pvp_running
   end
+
+  def battle_tick
+    super
+    return unless @pvp_running && !@battle_completed && !@battle_cleanup && connected?
+    if Process.clock_gettime(Process::CLOCK_MONOTONIC) - @pvp_last_pong >= 35
+      disconnect
+      @battle_failure = "battle_server_silent"
+    end
+  end
+
+  def receive(message)
+    if @pvp_running && message.is_a?(Hash) && message["type"] == "pong"
+      @pvp_last_pong = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+    super
+  end
 end
-AnilCoop.singleton_class.prepend(AnilCoopDuelMenuTransport)
+AnilCoop.singleton_class.prepend(AnilCoopDuelTransport)
 
 # Native Singles with Cable Club's mirrored ordering and Co-op's room transport.
 class AnilCoopDuel < Battle_CableClub
@@ -93,11 +109,19 @@ class AnilCoopDuel < Battle_CableClub
         key = PBEffects.const_get(name)
         effects[key] = canonical_index(effects[key]) if effects[key].is_a?(Integer)
       end
-      [b.pokemonIndex, b.hp, b.status, b.statusCount, b.stages, effects, b.ability_id, b.item_id]
+      [b.pokemonIndex, b.hp, b.status, b.statusCount, b.stages, effects, b.ability_id, b.item_id,
+       b.form, b.types, b.attack, b.defense, b.spatk, b.spdef, b.speed,
+       b.moves.map { |m| [m.id, m.pp] }]
+    end
+    positions = @positions.first(2).map do |position|
+      effects = position.effects.dup
+      key = PBEffects::FutureSightUserIndex
+      effects[key] = canonical_index(effects[key])
+      effects
     end
     data = [canonical_order(parties), canonical_order(battlers), @field.effects,
             @field.weather, @field.weatherDuration, @field.terrain, @field.terrainDuration,
-            canonical_order(@sides.map(&:effects)), @turnCount, decision_for_room]
+            canonical_order(@sides.map(&:effects)), canonical_order(positions), @turnCount, decision_for_room]
     Digest::SHA256.hexdigest(JSON.generate(AnilCoop.canonical_state(data)))
   end
 
@@ -254,6 +278,7 @@ module AnilCoop
 
   def self.run_duel(offer)
     @pvp_running = true
+    @pvp_last_pong = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     @last_pvp_result = nil
     @active_battle = offer.fetch("battle")
     @battle_seq = 0
@@ -292,6 +317,7 @@ module AnilCoop
     # Snapshots already contain the effective values. Never randomize them again
     # using a replica's personal settings when constructing or using them.
     $PokemonGlobal.random_enabled = false if $PokemonGlobal.respond_to?(:random_enabled=)
+    $PokemonGlobal.challenge_started = false if $PokemonGlobal.respond_to?(:challenge_started=)
     $PokemonGlobal.challenge_encs ||= {} if $PokemonGlobal.respond_to?(:challenge_encs)
     parties = entries.map { |entry| entry.fetch("team").map { |pokemon| team_pokemon(pokemon) } }
     trainers = entries.map do |entry|
@@ -327,6 +353,7 @@ module AnilCoop
     result = "Duelo cancelado. #{error.message}"
     result = case error.message
              when "battle_disconnect", "connection lost" then "Duelo cancelado por desconexión."
+             when "battle_server_silent" then "Duelo cancelado porque el servidor dejó de responder."
              when "battle_desync" then "Duelo cancelado porque los estados de ambos juegos no coincidieron."
              when "battle_cancelled" then "El rival canceló el duelo."
              else result
