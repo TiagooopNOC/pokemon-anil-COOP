@@ -149,6 +149,7 @@ class AnilCoopDuel < Battle_CableClub
 
   def pbCommandPhaseLoop(is_player)
     return unless is_player
+    AnilCoop.speed_battle_enforce
     state = digest
     packet = AnilCoop.battle_barrier("turn", state, choose_local_order, @scene)
     orders = packet.fetch("commands")
@@ -169,6 +170,7 @@ class AnilCoopDuel < Battle_CableClub
   end
 
   def pbSwitchInBetween(index, check_lax = false, can_cancel = false)
+    AnilCoop.speed_battle_enforce
     owner = canonical_index(index)
     state = digest
     selected = index == 0 ? pbPartyScreen(index, check_lax, can_cancel) : -1
