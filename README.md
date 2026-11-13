@@ -1,96 +1,67 @@
-# Pokémon Añil Co-op — alfa experimental para dos amigos
+# Pokémon Añil Co-op
 
-Exploración compartida, salvajes individuales y combate 2v2 contra entrenadores
-ordinarios, con 1–3 Pokémon propios por jugador. La historia, los guardados y las
-recompensas de cada participante permanecen individuales. Probado con motores
-reales bajo Wine y órdenes programadas; faltan controles humanos de punta a punta,
-dos computadoras físicas y Windows nativo.
+Mod experimental para explorar Pokémon Añil con amigos por LAN o VPN privada.
+Podés ver a otros jugadores y sus Pokémon acompañantes, y combatir en equipo
+contra entrenadores compatibles. Cada jugador conserva su propia historia,
+equipo y partida.
 
-**Windows x64:** extraé el ZIP del launcher y abrí `AnilCoop-Launcher.exe`.
-El asistente prepara una copia aislada de tu Añil v4.14 y habilita **JUGAR**.
-[Uso, distribución y compilación del launcher](docs/windows-launcher.md).
+## Jugar en Windows x64
 
-**Linux Mint:** ejecutá `./jugar-coop.sh`. Con una partida cargada, abrí
-**ESC → Online** para crear una sala o unirte por LAN o VPN privada.
-Requisitos, pasos y límites: [guía breve de la alfa](docs/alpha.md).
-Para generar el ZIP sin juego ni guardados: `python3 -B tools/h0.py package --alpha`.
-La exploración admite hasta cuatro clientes; los combates cooperativos solo dos.
+Cada jugador necesita su propia instalación de **Pokémon Añil v4.14** y el
+paquete `AnilCoop-Launcher-win-x64.zip`. El paquete incluye Python y el mod.
+El juego original se consigue por separado.
 
-## Probar en Linux Mint
+1. Extraé el ZIP completo en una carpeta.
+2. Abrí `AnilCoop-Launcher.exe`.
+3. En el primer inicio, elegí la carpeta del juego original que contiene `Game.exe`.
+4. Esperá a que termine la preparación. Cuando aparezca **Listo para jugar**,
+   pulsá **JUGAR**.
 
-Usá las copias aisladas ya preparadas. Desde la raíz de `anil-coop`, instalá o
-actualizá el overlay propio en ellas (no toca el original):
+El launcher prepara una copia aislada y muestra el progreso por archivo. En los
+siguientes inicios podés pulsar **JUGAR** directamente. Las partidas de Co-op
+quedan en `%LOCALAPPDATA%\AnilCoop\local\clients\client01\profile\saves`.
 
-```sh
-python3 -B tools/install_presence.py --clients client01 client02 client03 client04
-```
+¿Tenés el código fuente de GitHub y necesitás el ZIP? La compilación genera
+`dist/windows/AnilCoop-Launcher-win-x64.zip`. [Compilar el launcher y preparar el ZIP](docs/windows-launcher.md#compilar-y-distribuir).
 
-Abrí dos terminales. En la primera iniciá el servidor local; dejalo abierto:
+## Jugar en Linux Mint
 
-```sh
-python3 -B src/server/session_server.py --port 17641
-```
-
-En la segunda lanzá los clientes deseados. Para dos jugadores:
+Con Wine, Python 3.10 o posterior y Tkinter instalados, abrí una terminal en
+la carpeta del repositorio y ejecutá:
 
 ```sh
-python3 -B tools/wine_smoke.py --clients client01 client02 --seconds 600 \
-  --gameslot ../coop-anything/tools/gameslot/gameslot.py \
-  --session ANIL01 --port 17641 --host-client client01
+./jugar-coop.sh
 ```
 
-Para tres o cuatro, agregá `client03` y `client04` a `--clients`. Entrá primero
-al mapa con `client01` para crear la sesión; después cargá o creá las demás
-partidas. Los clientes se conectan desde el juego cuando llegan al mapa. Hacé
-clic en cada ventana para controlarla. El lanzador cierra sus procesos al terminar
-`--seconds` o cuando se cierran las ventanas; detené el servidor con Ctrl+C.
-Si repetís la sesión sin reiniciar el servidor, elegí otro código `--session`.
-Los guardados, logs y capturas de prueba permanecen en `local/`.
+La primera vez, elegí la carpeta de tu Pokémon Añil v4.14 para preparar la copia
+aislada.
 
-## Entorno y preparación
+## Conectarte con amigos
 
-Infraestructura de desarrollo para Windows x64 desde Linux Mint. Se preparan de
-uno a cuatro clientes independientes, un preload de aislamiento de guardados,
-verificaciones de integridad y herramientas portables.
+1. En cada equipo, cargá una partida y entrá al mapa.
+2. El anfitrión abre **ESC → Online → Crear sala** y elige su IP privada de LAN
+   o VPN. Comparte esa IP y el código de sala.
+3. Los invitados abren **ESC → Online → Unirse a un amigo** e ingresan la IP
+   y el código.
 
-El repositorio contiene el mod, herramientas y GameSlot bajo licencia MIT. El juego,
-sus plugins, las copias de prueba, los guardados y los informes privados quedan
-fuera de Git, dentro de `local/`. No se distribuye el juego ni VMS.
+La exploración admite hasta cuatro jugadores. Los combates cooperativos son 2v2,
+con hasta tres Pokémon elegidos por persona. Usá partidas de prueba para esta
+alfa. [Combates, controles de prueba y límites conocidos](docs/alpha.md#combatir).
 
-## Herramientas de desarrollo
+## Desarrollo
 
-Requiere Python 3.10 o posterior, sin dependencias de pip. Ejecutar desde este
-repositorio; utilizar una instalación propia del build identificado en
-`config/build.json`. No ejecutar el juego original para probar el mod.
+Los comandos de desarrollo requieren Python 3.10 o posterior. En Windows, usá
+`py -3` en lugar de `python3`. El [manifiesto de compatibilidad](config/build.json)
+identifica el build de Añil y sus archivos críticos.
 
 ```sh
 python3 -B tools/h0.py doctor
 python3 -B -m unittest discover -s tests -v
-python3 -B tools/h0.py prepare --source "<carpeta original del juego>" --clients 4
-python3 -B tools/h0.py verify
-python3 -B tools/h0.py launch --clients client01 client02 client03 client04
-python3 -B tools/h0.py package
 ```
 
-`prepare` se ejecuta una sola vez: rechaza sobrescribir clientes existentes.
-`launch` sin `--run` **solo muestra un plan**. No abre el juego ni sockets.
-`package` crea un ZIP de herramientas propias. El prototipo requiere una copia
-local del juego por computadora y un servidor en una IP privada de LAN/VPN.
-
-En Windows usar `py -3` en lugar de `python3`. GameSlot revisado está incluido en
-`vendor/gameslot/`. Los comandos de arriba son herramientas de desarrollo;
-para jugar usar el asistente y la guía de la alfa.
-
-## Estado y documentos
-
-- [Resultados reales y bloqueos](docs/validation.md).
-- [Reglas funcionales, incluidos duplicados enemigos](docs/requirements.md).
-- [Arquitectura y contratos para los próximos hitos](docs/architecture.md).
-- [Procedimiento de preparación, Windows y guardados](docs/hito-0.md).
-- [Dependencias, licencias y evaluación de VMS](docs/third-party.md).
-
-El arranque del preload y el ciclo guardar/cerrar/cargar se comprobaron bajo Wine.
-Dos copias crearon guardados privados distintos. La integración visual de hasta
-cuatro clientes se comprobó bajo Wine. La conexión por IP privada se comprobó
-con dos juegos en una computadora; faltan las pruebas entre dos computadoras y
-en Windows x64 nativo.
+- [Compilación, distribución y guardados del launcher de Windows](docs/windows-launcher.md)
+- [Preparación de perfiles aislados y pruebas con Wine](docs/hito-0.md)
+- [Conexión manual entre equipos para desarrollo](docs/connect.md)
+- [Resultados de validación](docs/validation.md)
+- [Arquitectura del mod](docs/architecture.md) y [requisitos funcionales](docs/requirements.md)
+- [Dependencias y licencias de terceros](docs/third-party.md)
