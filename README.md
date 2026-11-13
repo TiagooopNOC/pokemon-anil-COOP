@@ -6,8 +6,12 @@ recompensas de cada participante permanecen individuales. Probado con motores
 reales bajo Wine y órdenes programadas; faltan controles humanos de punta a punta,
 dos computadoras físicas y Windows nativo.
 
-**Empezar:** `Jugar-Coop.cmd` en Windows x64 o `./jugar-coop.sh` en Linux Mint.
-Elegí **Multijugador** en la pantalla principal para crear/unirte por LAN o VPN privada.
+**Windows x64:** extraé el ZIP del launcher y abrí `AnilCoop-Launcher.exe`.
+El asistente prepara una copia aislada de tu Añil v4.14 y habilita **JUGAR**.
+[Uso, distribución y compilación del launcher](docs/windows-launcher.md).
+
+**Linux Mint:** ejecutá `./jugar-coop.sh`. Con una partida cargada, abrí
+**ESC → Online** para crear una sala o unirte por LAN o VPN privada.
 Requisitos, pasos y límites: [guía breve de la alfa](docs/alpha.md).
 Para generar el ZIP sin juego ni guardados: `python3 -B tools/h0.py package --alpha`.
 La exploración admite hasta cuatro clientes; los combates cooperativos solo dos.
@@ -53,7 +57,7 @@ El repositorio contiene el mod, herramientas y GameSlot bajo licencia MIT. El ju
 sus plugins, las copias de prueba, los guardados y los informes privados quedan
 fuera de Git, dentro de `local/`. No se distribuye el juego ni VMS.
 
-## Uso
+## Herramientas de desarrollo
 
 Requiere Python 3.10 o posterior, sin dependencias de pip. Ejecutar desde este
 repositorio; utilizar una instalación propia del build identificado en
