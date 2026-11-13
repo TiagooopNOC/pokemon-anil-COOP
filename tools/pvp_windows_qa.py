@@ -55,7 +55,8 @@ def run(source, scenario):
             server.shutdown()
             thread.join()
     print(json.dumps(results, indent=2))
-    assert all(row["originals"] and row["save_intact"] and row["map_restored"] for row in results)
+    assert all(row.get("originals") and row.get("save_intact") and row.get("map_restored")
+               for row in results), "QA failed before verifying save integrity and map restoration"
     if scenario == "decline":
         assert all(row["declined"] and row["connected"] for row in results)
     elif scenario == "disconnect":

@@ -29,6 +29,7 @@ class AnilCoopDuel < Battle_CableClub
     setBattleMode("single")
     @internalBattle = @expGain = @moneyGain = @switchStyle = false
     @controlPlayer = false
+    @debug = false
     @canLose = true
     @z_rng = ZCable::BattleRNG.new(seed)
     @items = [[]]
@@ -200,7 +201,7 @@ module AnilCoop
       raise BattleStopped, "#{pokemon.name} tiene una forma que no se puede sincronizar." unless
         GameData::Species.get_species_form(pokemon.species, pokemon.form).form == pokemon.form
       copy = team_pokemon(snapshot)
-      unless team_snapshot(copy, index) == snapshot
+      unless team_snapshot(copy, index) == snapshot && copy.species_data.id == pokemon.species_data.id
         raise BattleStopped, "#{pokemon.name} tiene atributos que no se pueden sincronizar."
       end
       snapshot
@@ -322,7 +323,12 @@ module AnilCoop
     @last_pvp_result = { error: error.message, complete: false }
     log("PvP: #{error.class}: #{error.message}\n#{error.backtrace.first(8).join("\n")}")
     result = "Duelo cancelado. #{error.message}"
-    result = "Duelo cancelado por desconexión." if ["battle_disconnect", "connection lost"].include?(error.message)
+    result = case error.message
+             when "battle_disconnect", "connection lost" then "Duelo cancelado por desconexión."
+             when "battle_desync" then "Duelo cancelado porque los estados de ambos juegos no coincidieron."
+             when "battle_cancelled" then "El rival canceló el duelo."
+             else result
+             end
   ensure
     waiting&.dispose
     if @active_battle && !@battle_completed && connected?

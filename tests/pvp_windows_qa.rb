@@ -11,6 +11,12 @@ class AnilCoopDuel
 
   def pbFightMenu(index)
     AnilCoop.log("PvP QA input #{@turnCount}")
+    if @turnCount == 0
+      raise "PvP did not lock speed" unless $GameSpeed == 0 && !$CanToggle
+      bitmap = Graphics.snap_to_bitmap
+      bitmap.save_to_png(File.join(AnilCoopDev::PROFILE, "qa-pvp-battle.png"))
+      bitmap.dispose
+    end
     if ENV["ANIL_PVP_QA_MODE"] == "disconnect" && @client_id == 1 && @turnCount >= 1
       AnilCoop.disconnect
       raise AnilCoop::BattleStopped, 'QA transport closed'
@@ -107,7 +113,7 @@ trace = TracePoint.new(:return) do |event|
         AnilCoop.tick($scene)
         AnilCoop.instance_variable_get(:@peers).dig(remote, "position", "seq").to_i > previous
       end
-      until_time = System.uptime + 1
+      until_time = System.uptime + 2
       while System.uptime < until_time
         AnilCoop.tick($scene)
         Graphics.update
