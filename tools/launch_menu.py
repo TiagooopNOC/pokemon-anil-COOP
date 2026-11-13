@@ -52,7 +52,7 @@ def main():
                           ANIL_COOP_CONTROL_TOKEN=server.token)
         slot = ROOT / "vendor/gameslot/gameslot.py"
         if os.name == "nt":
-            launch_windows(ROOT, [client], slot, coop_battles=True)
+            launch_windows(ROOT, [client], slot, coop_battles=True, pvp=True)
             return 0
         return subprocess.call([sys.executable, "-B", str(ROOT / "tools/wine_smoke.py"),
                                 "--client", client, "--gameslot", str(slot),

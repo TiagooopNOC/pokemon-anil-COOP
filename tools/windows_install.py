@@ -100,7 +100,7 @@ def play(data: Path, assets: Path, client: str, progress=ignore_progress):
 
     try:
         return launch_windows(
-            data, [client], None, coop_battles=True, before_launch=update_overlay,
+            data, [client], None, coop_battles=True, pvp=True, before_launch=update_overlay,
             environment={"ANIL_COOP_MENU": "1", "ANIL_COOP_CONTROL_PORT": str(server.server_address[1]),
                          "ANIL_COOP_CONTROL_TOKEN": server.token})
     finally:

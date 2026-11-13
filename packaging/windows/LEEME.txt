@@ -7,6 +7,8 @@ Pokémon Añil Co-op para Windows x64
 
 Con una partida cargada, abrí ESC → Online para crear una sala o unirte
 con el código y la IP privada de tu amigo (LAN o VPN).
+Para jugar 1v1, elegí a tu amigo en «Jugadores conectados» y pulsá
+«Desafiar a combate».
 
 La copia y sus partidas viven en %LOCALAPPDATA%\AnilCoop\local.
 Para actualizar el launcher, extraé el ZIP nuevo completo y abrilo.

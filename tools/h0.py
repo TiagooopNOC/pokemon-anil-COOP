@@ -342,7 +342,8 @@ def windows_profile_lock(path: Path, locking_module):
 
 def launch_windows(repo: Path, clients: list[str], gameslot: Path | None, *,
                    qa_2v2: bool = False, personal_team: bool = False,
-                   coop_battles: bool = False, environment=None, before_launch=None) -> dict:
+                   coop_battles: bool = False, pvp: bool = False,
+                   environment=None, before_launch=None) -> dict:
     # Wine uses its separate launcher; Windows uses an OS-owned per-profile lock.
     if not doctor(repo)["native_windows_x64"]:
         raise SafetyError("Runtime blocked: native Windows x64 required for this launcher")
@@ -384,6 +385,9 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path | None, *,
             handles.append(handle)
             run_env = dict(os.environ, **client["environment"])
             run_env.update(environment or {})
+            if pvp:
+                # Only the launcher opts in by default. Keep an internal kill switch.
+                run_env["ANIL_COOP_PVP"] = "0" if run_env.get("ANIL_COOP_PVP") == "0" else "1"
             run_env.pop("WINEPREFIX", None)
             run_env.pop("ANIL_COOP_SECRET", None)
             run_env.pop("ANIL_COOP_QA_WILD", None)

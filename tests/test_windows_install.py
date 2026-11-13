@@ -72,3 +72,10 @@ class WindowsInstallTests(unittest.TestCase):
         with self.assertRaisesRegex(h0.SafetyError, "contiene partidas"):
             self.install()
         self.assertEqual(save.read_bytes(), b"private save")
+
+    def test_play_opts_into_pvp_alongside_cooperative_battles(self):
+        client = self.install()
+        with patch.object(windows_install, "launch_windows") as launch:
+            windows_install.play(self.data, self.assets, client)
+        self.assertTrue(launch.call_args.kwargs["pvp"])
+        self.assertTrue(launch.call_args.kwargs["coop_battles"])

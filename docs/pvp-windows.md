@@ -1,15 +1,12 @@
 # Duelo amistoso en Windows x64
 
-El PvP experimental se activa por proceso con `ANIL_COOP_PVP=1`. Para
-probarlo manualmente, ambos jugadores necesitan el mismo checkout y el build
-compatible de Pokémon Añil. Usá dos perfiles aislados de prueba.
-
-Desde PowerShell, en la raíz del checkout de cada equipo:
-
-```powershell
-$env:ANIL_COOP_PVP = '1'
-py -3 -B tools/launch_menu.py
-```
+El launcher gráfico de Windows activa el PvP al pulsar **JUGAR**.
+Ambos jugadores necesitan la misma versión del mod y Pokémon Añil v4.14.
+Para pruebas de desarrollo usá perfiles aislados. En Windows,
+`tools/launch_menu.py` también activa el PvP al abrir el juego.
+El arranque directo de `Game.exe` deja el PvP deshabilitado por defecto.
+Para diagnóstico, `ANIL_COOP_PVP=0` deshabilita el PvP si está presente
+en el entorno del launcher antes de abrirlo.
 
 1. Cargá una partida y entrá al mapa. Creá una sala en **ESC → Online**
    con una IP privada de LAN o VPN. El invitado se une con esa IP y el código.

@@ -8,6 +8,8 @@
    Cuando aparezca **Listo para jugar**, presioná **JUGAR**.
 4. Cargá o empezá una partida. Usá **ESC → Online** para crear una sala o unirte
    por LAN o VPN privada. Podés minimizar el launcher mientras jugás.
+5. Para un duelo 1v1, elegí **Jugadores conectados**, seleccioná a tu amigo
+   y pulsá **Desafiar a combate**. Ambos deben usar la misma versión del mod.
 
 El ZIP incluye el runtime de Python, Tcl/Tk y el mod. Cada jugador aporta su propia
 instalación original. Podés crear un acceso directo desde el menú contextual del
