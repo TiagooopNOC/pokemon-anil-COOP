@@ -446,7 +446,7 @@ module AnilCoop
       @connection_error = message["reason"]
       log("server error #{message["reason"]}")
       if message["reason"].to_s.start_with?("battle_")
-        @battle_failure = message["reason"] if @active_battle
+        @battle_failure ||= message["reason"] if @active_battle
       elsif message["reason"].to_s.start_with?("speed_") || message["reason"] == "invalid_speed"
         log("speed request rejected #{message['reason']}")
       elsif message["reason"].to_s.start_with?("trainer_") || message["reason"] == "coop_battle_pending"

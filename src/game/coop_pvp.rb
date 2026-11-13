@@ -61,6 +61,7 @@ class AnilCoopDuel < Battle_CableClub
   def pbCanDynamax?(*); false; end
   def pbCanTerastallize?(*); false; end
   def pbCanUltraBurst?(*); false; end
+  def pbDecisionOnDraw; 5; end
   def pbGainExp; end
   def pbGainMoney; end
   def pbLoseMoney; end
@@ -121,7 +122,8 @@ class AnilCoopDuel < Battle_CableClub
     end
     data = [canonical_order(parties), canonical_order(battlers), @field.effects,
             @field.weather, @field.weatherDuration, @field.terrain, @field.terrainDuration,
-            canonical_order(@sides.map(&:effects)), canonical_order(positions), @turnCount, decision_for_room]
+            canonical_order(@sides.map(&:effects)), canonical_order(positions), @turnCount,
+            @lastMoveUsed, canonical_index(@lastMoveUser), decision_for_room]
     Digest::SHA256.hexdigest(JSON.generate(AnilCoop.canonical_state(data)))
   end
 
@@ -360,7 +362,7 @@ module AnilCoop
              end
   ensure
     waiting&.dispose
-    if @active_battle && !@battle_completed && connected?
+    if @active_battle && !@battle_completed && !@battle_failure && connected?
       queue(type: "battle_abort", battle: @active_battle)
       network
     end
