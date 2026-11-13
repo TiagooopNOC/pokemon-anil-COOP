@@ -33,8 +33,11 @@ class SafetyError(RuntimeError):
 def no_links(path: Path) -> Path:
     path = Path(os.path.abspath(path))
     for p in (path, *path.parents):
-        reparse = (getattr(p.lstat(), "st_file_attributes", 0) & 0x400) if p.exists() else 0
-        if p.is_symlink() or reparse or (hasattr(p, "is_junction") and p.is_junction()):
+        try:
+            info = p.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise SafetyError(f"Symlink/junction not allowed: {p}")
     return path
 
@@ -78,22 +81,36 @@ def parse_jsonc(text: str) -> dict:
     return result
 
 
-def snapshot(root: Path) -> dict:
+def ignore_progress(phase, done=0, total=0):
+    pass
+
+
+def snapshot(root: Path, progress=ignore_progress, phase="validating") -> dict:
     no_links(root)
     if not root.is_dir():
         raise SafetyError(f"Directory missing: {root}")
-    files = {}
-    for current, dirs, names in os.walk(root, followlinks=False):
+    progress(phase)
+    paths = []
+
+    def raise_walk_error(error):
+        raise error
+
+    for current, dirs, names in os.walk(root, followlinks=False, onerror=raise_walk_error):
         for name in dirs + names:
             p = Path(current) / name
-            no_links(p)
-            if p.is_file():
-                if not stat.S_ISREG(p.stat().st_mode):
-                    raise SafetyError(f"Not a regular file: {p}")
-                files[p.relative_to(root).as_posix()] = {
-                    "size": p.stat().st_size, "sha256": digest(p)}
-            elif not p.is_dir():
+            info = p.lstat()
+            if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                raise SafetyError(f"Symlink/junction not allowed: {p}")
+            if stat.S_ISREG(info.st_mode):
+                paths.append(p)
+            elif not stat.S_ISDIR(info.st_mode):
                 raise SafetyError(f"Unsupported filesystem entry: {p}")
+    files = {}
+    progress(phase, 0, len(paths))
+    for index, path in enumerate(paths, 1):
+        files[path.relative_to(root).as_posix()] = {
+            "size": path.stat().st_size, "sha256": digest(path)}
+        progress(phase, index, len(paths))
     return files
 
 
@@ -118,24 +135,26 @@ def validate_build(source: Path, build: dict) -> None:
         raise SafetyError("Source already contains a development overlay")
 
 
-def record_baseline(repo: Path, source: Path) -> dict:
+def record_baseline(repo: Path, source: Path, *, assets: Path | None = None,
+                    progress=ignore_progress) -> dict:
     disjoint(repo, source)
-    validate_build(source, read_json(repo / "config/build.json"))
+    validate_build(source, read_json((assets or repo) / "config/build.json"))
     manifest = repo / "local/original.json"
     if manifest.exists():
         baseline = read_json(no_links(manifest))
         if Path(baseline["source"]).resolve() != source.resolve():
             raise SafetyError("Existing baseline belongs to another source")
-        changed = differences(baseline["files"], snapshot(source))
+        changed = differences(baseline["files"], snapshot(source, progress))
         if changed:
             raise SafetyError(f"Original differs from baseline: {changed[:10]}")
         return baseline
-    baseline = {"schema": 1, "source": str(source.resolve()), "files": snapshot(source)}
+    baseline = {"schema": 1, "source": str(source.resolve()), "files": snapshot(source, progress)}
     write_new(manifest, baseline)
     return baseline
 
 
-def prepare(repo: Path, source: Path, count: int) -> dict:
+def prepare(repo: Path, source: Path, count: int, *, assets: Path | None = None,
+            progress=ignore_progress) -> dict:
     if not 1 <= count <= 4:
         raise SafetyError("Client count must be between 1 and 4")
     source = no_links(source).resolve()
@@ -146,7 +165,8 @@ def prepare(repo: Path, source: Path, count: int) -> dict:
         raise SafetyError("Workspace already prepared; verify it, never overwrite profiles")
     if list(local.glob(".prepare-*")):
         raise SafetyError("Incomplete preparation exists; inspect its manifest before retrying")
-    baseline = record_baseline(repo, source)
+    progress("validating")
+    baseline = record_baseline(repo, source, assets=assets, progress=progress)
     files = {k: v for k, v in baseline["files"].items() if not is_save(k)}
     required = sum(v["size"] for v in files.values()) * count
     if shutil.disk_usage(local).free < required + 100 * 1024 * 1024:
@@ -157,6 +177,8 @@ def prepare(repo: Path, source: Path, count: int) -> dict:
     stage = local / (".prepare-" + uuid.uuid4().hex)
     stage.mkdir()
     profiles = []
+    total = count * len(files)
+    copied = 0
     for index in range(1, count + 1):
         client = f"client{index:02d}"
         token = uuid.uuid4().hex
@@ -165,14 +187,18 @@ def prepare(repo: Path, source: Path, count: int) -> dict:
         for directory in (game, profile / "saves", profile / "logs",
                           profile / "appdata", profile / "localappdata", base / "wine-prefix"):
             directory.mkdir(parents=True, exist_ok=True)
+        progress("copying", copied, total)
         for name in files:
             dest = game / name
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source / name, dest)  # Never hardlink or symlink game files.
+            copied += 1
+            progress("copying", copied, total)
+        progress("saves")
         shutil.copy2(game / "mkxp.json", profile / "mkxp.original.json")
         overlay = game / "CoopDev"
         overlay.mkdir()
-        shutil.copy2(repo / "src/bootstrap/isolate.rb", overlay / "isolate.rb")
+        shutil.copy2((assets or repo) / "src/bootstrap/isolate.rb", overlay / "isolate.rb")
         for marker in (overlay / "profile-id.txt", profile / "profile-id.txt"):
             marker.write_text(token + "\n", encoding="ascii")
         patched = dict(config, dataPathOrg="AnilCoopDev", dataPathApp=token,
@@ -184,7 +210,7 @@ def prepare(repo: Path, source: Path, count: int) -> dict:
                             "sha256": digest(game / name)} for name in
                      ("mkxp.json", "CoopDev/isolate.rb", "CoopDev/profile-id.txt")}
         profiles.append({"client": client, "profile_id": token, "overrides": overrides})
-    if differences(baseline["files"], snapshot(source)):
+    if differences(baseline["files"], snapshot(source, progress, "checking_source")):
         raise SafetyError("Source changed while copying; staged copies retained for inspection")
     write_new(stage / "preparation.json", {"clients": profiles})
     stage.rename(clients)
@@ -195,14 +221,15 @@ def prepare(repo: Path, source: Path, count: int) -> dict:
             "excluded_saves": result["excluded_saves"], "runtime_tested": False}
 
 
-def verify(repo: Path, include_source: bool = True) -> dict:
+def verify(repo: Path, include_source: bool = True, *, assets: Path | None = None,
+           progress=ignore_progress) -> dict:
     local = no_links(repo / "local")
     baseline = read_json(no_links(local / "original.json"))
     workspace = read_json(no_links(local / "workspace.json"))
     source = Path(baseline["source"])
     disjoint(repo, source)
     if include_source:
-        changed = differences(baseline["files"], snapshot(source))
+        changed = differences(baseline["files"], snapshot(source, progress, "checking_source"))
         if changed:
             raise SafetyError(f"Original integrity failed: {changed[:10]}")
     base_files = {k: v for k, v in baseline["files"].items() if not is_save(k)}
@@ -222,10 +249,10 @@ def verify(repo: Path, include_source: bool = True) -> dict:
         no_links(base / "wine-prefix")
         # Wine creates standard links inside its prefix (for example Downloads).
         # The game and the private save profile must still contain no links.
-        for checked_root in (game, profile):
-            for current, dirs, names in os.walk(checked_root, followlinks=False):
-                for name in dirs + names:
-                    no_links(Path(current) / name)
+        no_links(profile)
+        for current, dirs, names in os.walk(profile, followlinks=False):
+            for name in dirs + names:
+                no_links(Path(current) / name)
         no_links(profile / "saves")
         if not (profile / "saves").is_dir():
             raise SafetyError("Save directory missing")
@@ -238,7 +265,7 @@ def verify(repo: Path, include_source: bool = True) -> dict:
         if (profile / "profile-id.txt").read_text().strip() != token:
             raise SafetyError("Profile marker changed")
         expected = dict(base_files, **entry["overrides"])
-        changed = differences(expected, snapshot(game))
+        changed = differences(expected, snapshot(game, progress, "verifying"))
         if changed:
             raise SafetyError(f"{client}: game copy changed: {changed[:10]}")
         # In addition to stored hashes, assert safety policy independently.
@@ -246,7 +273,7 @@ def verify(repo: Path, include_source: bool = True) -> dict:
         if (cfg.get("dataPathOrg") != "AnilCoopDev" or cfg.get("dataPathApp") != token
                 or cfg.get("preloadScript") != ["CoopDev/isolate.rb"]
                 or cfg.get("customScript") or cfg.get("postloadScript")
-                or digest(game / "CoopDev/isolate.rb") != digest(repo / "src/bootstrap/isolate.rb")
+                or digest(game / "CoopDev/isolate.rb") != digest((assets or repo) / "src/bootstrap/isolate.rb")
                 or (game / "CoopDev/profile-id.txt").read_text().strip() != token
                 or digest(profile / "mkxp.original.json") != base_files["mkxp.json"]["sha256"]):
             raise SafetyError(f"{client}: isolation policy failed")
@@ -279,13 +306,13 @@ def doctor(repo: Path) -> dict:
 def launch_plan(repo: Path, clients: list[str]) -> dict:
     if not clients or len(set(clients)) != len(clients):
         raise SafetyError("Select distinct prepared clients")
-    workspace = read_json(repo / "local/workspace.json")
+    workspace = read_json(no_links(repo / "local/workspace.json"))
     available = {p["client"]: p for p in workspace["clients"]}
     result = []
     for client in clients:
-        if client not in available:
+        if client not in available or not re.fullmatch(r"client0[1-4]", client):
             raise SafetyError(f"Unknown client: {client}")
-        base = (repo / "local/clients" / client).resolve()
+        base = no_links(repo / "local/clients" / client)
         executable = base / "game/Game.exe"
         command = [str(executable)] if os.name == "nt" else ["wine", str(executable)]
         result.append({"client": client, "command": command, "cwd": str(base / "game"),
@@ -313,7 +340,9 @@ def windows_profile_lock(path: Path, locking_module):
         raise SafetyError("Esta copia de Añil ya está abierta. Cerrá su ventana antes de reintentar.")
 
 
-def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bool = False, personal_team: bool = False, coop_battles: bool = False) -> dict:
+def launch_windows(repo: Path, clients: list[str], gameslot: Path | None, *,
+                   qa_2v2: bool = False, personal_team: bool = False,
+                   coop_battles: bool = False, environment=None, before_launch=None) -> dict:
     # Wine uses its separate launcher; Windows uses an OS-owned per-profile lock.
     if not doctor(repo)["native_windows_x64"]:
         raise SafetyError("Runtime blocked: native Windows x64 required for this launcher")
@@ -343,6 +372,8 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bo
         raise
     processes, handles = [], []
     try:
+        if before_launch:
+            before_launch()
         for client in plan["clients"]:
             profile = Path(client["save_directory"]).parent
             evidence = profile / "bootstrap-loaded.txt"
@@ -352,6 +383,7 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bo
             handle = logfile.open("xb")
             handles.append(handle)
             run_env = dict(os.environ, **client["environment"])
+            run_env.update(environment or {})
             run_env.pop("WINEPREFIX", None)
             run_env.pop("ANIL_COOP_SECRET", None)
             run_env.pop("ANIL_COOP_QA_WILD", None)
@@ -369,8 +401,20 @@ def launch_windows(repo: Path, clients: list[str], gameslot: Path, *, qa_2v2: bo
                 run_env["ANIL_COOP_PERSONAL_TEAM"] = "1"
             if qa_2v2:
                 run_env.update(ANIL_COOP_QA_TRAINER="1", ANIL_COOP_QA_2V2="1")
-            process = subprocess.Popen(client["command"], cwd=client["cwd"], env=run_env,
-                                       stdout=handle, stderr=subprocess.STDOUT)
+            if getattr(sys, "frozen", False):
+                # The external mkxp-z executable must use its own DLL search path.
+                import ctypes
+                set_dll_directory = ctypes.windll.kernel32.SetDllDirectoryW
+                set_dll_directory.argtypes = [ctypes.c_wchar_p]
+                if not set_dll_directory(None):
+                    raise ctypes.WinError()
+            try:
+                process = subprocess.Popen(client["command"], cwd=client["cwd"], env=run_env,
+                                           stdout=handle, stderr=subprocess.STDOUT,
+                                           creationflags=subprocess.CREATE_NO_WINDOW)
+            finally:
+                if getattr(sys, "frozen", False):
+                    set_dll_directory(sys._MEIPASS)
             processes.append(process)
         while any(p.poll() is None for p in processes):
             time.sleep(0.25)
