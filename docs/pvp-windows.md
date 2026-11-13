@@ -37,16 +37,59 @@ py -3 -B -m tools.pvp_windows_qa --source "<Añil original>" --scenario host
 ```
 
 El runner crea dos copias nuevas bajo `local/pvp-qa-…` con perfiles y
-guardados desechables. Las órdenes de prueba son programadas dentro del
-motor. Los otros escenarios son `guest`, `decline`, `switch` y
-`disconnect`. Cada corrida deja sus logs y resultados en los perfiles QA.
+guardados desechables. Para repetir un caso, reemplazá `--source` por
+`--qa-workspace "<ruta QA que imprimió el runner>"`. Usá ese directorio para
+una sola corrida a la vez. Cada caso vuelve a crear las partidas de prueba.
+
+Las órdenes se programan dentro del motor. Se arranca un proceso por perfil
+para crear y guardar, otro para cargar y disputar el duelo, y otro para
+recargar el guardado posterior. Los perfiles QA guardan el informe JSON,
+logs y capturas del combate y del selector. El servidor comprueba el estado
+de ambos motores al final de cada ronda y en el resultado.
+
+| Prueba | Escenarios |
+| --- | --- |
+| Victoria, rechazo, cambios y desconexión | `host`, `guest`, `decline`, `switch`, `both_switch`, `disconnect` |
+| Mecánicas | `weather`, `status`, `freeze`, `priority`, `ability`, `ability_out`, `form`, `draw` |
+| Partidas y guardados | `restart`, `random`, `random_both`, `nuzlocke`, `randomlocke` |
+| Red y espera | `wait`, `silent`, `selection_disconnect`, `animation_disconnect`, `exit` |
+| Regresión de historia cooperativa | `brock` |
+
+Las pruebas dirigidas se ejecutaron con dos instancias nativas de Añil v4.14
+en Windows x64 y un servidor local:
+
+- Lluvia, sol, arena y nieve, junto con parálisis, quemadura, veneno, sueño
+  y daño residual de `FROSTBITE`, la variante de congelación de esta versión.
+- Ataque Rápido, Protección, Vuelo, Gruñido, cambios simultáneos y
+  sustitución obligatoria con el menú nativo. Baya Aranja, Llovizna y Sequía
+  al entrar, Regeneración al salir, Rotom Calor y empate por Canto Mortal.
+- Normal contra Normal, Randomizer o Nuzlocke, Randomizer contra Randomizer
+  y Randomlocke contra Normal. Las partidas de Randomizer usaron tipos,
+  habilidades, movimientos y objetos distintos a los del equipo Normal.
+- Espera de 125 segundos con ambos clientes conectados. Cancelación ante
+  pérdida de conexión en el selector o durante una animación, y ante un
+  servidor que dejó de responder a los latidos.
+- Brock 2v2 con el evento original. Ambos perfiles recibieron la medalla,
+  el progreso y los objetos del evento y los conservaron tras recargar.
+
+La comparación de partidas verifica equipo, dinero, medallas, inventario,
+flags de historia y datos de desafío. También comprueba que el archivo
+previo al duelo conserve el mismo hash.
 
 ## Alcance experimental
 
 El duelo usa una arena inicial neutra, el orden espejado de Cable Club y
 semillas acordadas por el servidor. Los estados divergentes cancelan el
 duelo. La bolsa y las transformaciones de combate quedan deshabilitadas.
-Los Pokémon cuyo snapshot no reproduce sus atributos se rechazan. La
-validación de la matriz completa de movimientos, climas, formas especiales
-y partidas con Randomizer o Randomlocke sigue pendiente. El guardado y los
-efectos persistentes del juego permanecen fuera de la sincronización.
+Los Pokémon cuyo snapshot no reproduce sus atributos se rechazan antes de
+empezar. Las pruebas dirigidas cubren casos representativos. Quedan por
+probar otras formas, habilidades y movimientos de varios turnos, y una
+sesión humana por LAN o VPN, incluida la interacción con
+menús, mensajes y controles de combate. La recarga automatizada usa el
+backend del launcher para abrir procesos nuevos de juego.
+
+Al integrar intercambios, revisar `src/game/coop.rb`, donde ambos flujos
+comparten la recepción de eventos de red, y `src/game/coop_pvp.rb`, que
+consume snapshots de equipos y verifica transacciones pendientes antes del
+duelo. Esta ronda de estabilización no cambió el servidor, los snapshots
+compartidos ni el menú Online.
