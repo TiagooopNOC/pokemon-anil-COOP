@@ -5,6 +5,9 @@ Pokémon Añil Co-op para Windows x64
 3. Elegí la carpeta de tu Pokémon Añil v4.14 que contiene Game.exe.
 4. Esperá a que aparezca «Listo» y presioná «JUGAR».
 
+Para traer una partida de Añil original, usá «Importar partida guardada»
+en el launcher y cargá la ranura indicada desde el juego.
+
 Con una partida cargada, abrí ESC → Online para crear una sala o unirte
 con el código y la IP privada de tu amigo (LAN o VPN).
 Para jugar 1v1, elegí a tu amigo en «Jugadores conectados» y pulsá
