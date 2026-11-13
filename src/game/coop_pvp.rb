@@ -129,6 +129,9 @@ class AnilCoopDuel < Battle_CableClub
 
   def local_order
     return ["forfeit", 0, -1] if @forfeit
+    # The native command phase keeps the previous choice for a charging or
+    # locked-in battler. Its continuation is already present in both engines.
+    return ["none", 0, -1] unless pbCanShowCommands?(0)
     action, slot, move, target = @choices[0]
     case action
     when :UseMove
