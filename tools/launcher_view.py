@@ -92,14 +92,13 @@ class ClassicMenuView:
         style.configure("Classic.Horizontal.TProgressbar", troughcolor="#d2e4ee",
                         background=BLUE, lightcolor=BLUE, darkcolor=BLUE, bordercolor=TRIM,
                         thickness=self.px(9))
-        style.configure("Classic.TButton", anchor="w", background=PANEL, foreground=INK,
-                        bordercolor=PANEL, lightcolor=PANEL, darkcolor=PANEL, focuscolor=BLUE)
-        style.map("Classic.TButton", background=[("pressed", "#b9d8ec"), ("active", "#d2e4ee")],
-                  foreground=[("disabled", "#607994")])
-        style.configure("Classic.Play.TButton", font=self.face("Bahnschrift", 29, "bold"),
-                        padding=(self.px(8), self.px(5)))
-        style.configure("Classic.Setup.TButton", font=self.face("Segoe UI", 15, "bold"),
-                        padding=(self.px(8), self.px(5)))
+        for name, face in (("Classic.Play.TButton", self.face("Bahnschrift", 29, "bold")),
+                           ("Classic.Setup.TButton", self.face("Segoe UI", 15, "bold"))):
+            style.configure(name, anchor="w", font=face, background=PANEL, foreground=INK,
+                            bordercolor=PANEL, lightcolor=PANEL, darkcolor=PANEL, focuscolor=BLUE,
+                            padding=(self.px(8), self.px(5)))
+            style.map(name, background=[("pressed", "#b9d8ec"), ("active", "#d2e4ee")],
+                      foreground=[("disabled", "#607994")])
 
     def make_cursor(self, root):
         image = tk.PhotoImage(master=root, width=self.px(25), height=self.px(18))
