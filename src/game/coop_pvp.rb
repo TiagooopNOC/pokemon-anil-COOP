@@ -13,6 +13,9 @@ class AnilCoopDuelSelection < AnilCoopTeamSelection
 end
 
 module AnilCoopDuelTransport
+  HEARTBEAT_DEADLINE = 35
+  HEARTBEAT_UPDATE_GAP = 10
+
   def update_battle_menu
     super
     check_battle_transport! if @pvp_running
@@ -20,8 +23,13 @@ module AnilCoopDuelTransport
 
   def battle_tick
     super
-    return unless @pvp_running && !@battle_completed && !@battle_cleanup && connected?
-    if Process.clock_gettime(Process::CLOCK_MONOTONIC) - @pvp_last_pong >= 35
+    return unless @pvp_running && !@battle_completed && !@battle_cleanup && !@battle_failure && connected?
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    # A suspended game cannot send probes. Give the transport a new window
+    # when the native scene resumes its network updates.
+    @pvp_last_pong = now if now - @pvp_last_tick >= HEARTBEAT_UPDATE_GAP
+    @pvp_last_tick = now
+    if now - @pvp_last_pong >= HEARTBEAT_DEADLINE
       disconnect
       @battle_failure = "battle_server_silent"
     end
@@ -283,7 +291,7 @@ module AnilCoop
 
   def self.run_duel(offer)
     @pvp_running = true
-    @pvp_last_pong = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    @pvp_last_tick = @pvp_last_pong = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     @last_pvp_result = nil
     @active_battle = offer.fetch("battle")
     @battle_seq = 0

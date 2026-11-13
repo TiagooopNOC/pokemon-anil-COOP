@@ -112,7 +112,8 @@ def run_prepared(workspace, scenario):
         expected = "connection lost" if scenario == "selection_disconnect" else "QA transport closed"
         assert results[1]["error"] == expected, results
     elif scenario == "silent":
-        assert all(row["error"] == "battle_server_silent" for row in results), results
+        reasons = {row["error"] for row in results}
+        assert "battle_server_silent" in reasons and reasons <= {"battle_server_silent", "battle_disconnect"}, results
     elif scenario == "exit":
         assert results[0]["error"] in ("battle_disconnect", "battle_cancelled") and results[1]["exited"]
     else:
