@@ -1,0 +1,14 @@
+Pokémon Añil Co-op para Windows x64
+
+1. Extraé todo el ZIP en una carpeta propia.
+2. Abrí AnilCoop-Launcher.exe.
+3. Elegí la carpeta de tu Pokémon Añil v4.14 que contiene Game.exe.
+4. Esperá a que aparezca «Listo» y presioná «JUGAR».
+
+Con una partida cargada, abrí ESC → Online para crear una sala o unirte
+con el código y la IP privada de tu amigo (LAN o VPN).
+
+La copia y sus partidas viven en %LOCALAPPDATA%\AnilCoop\local.
+Para actualizar el launcher, extraé el ZIP nuevo completo y abrilo.
+Para crear un acceso directo, hacé clic derecho en el EXE y elegí
+Enviar a → Escritorio (crear acceso directo).
