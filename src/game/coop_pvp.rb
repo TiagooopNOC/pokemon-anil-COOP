@@ -124,7 +124,7 @@ class AnilCoopDuel < Battle_CableClub
     when "move"
       b = @battlers[index]
       move = slot < 0 ? @struggle : b.moves[slot]
-      legal = slot < 0 ? !pbCanShowFightMenu?(index) : pbCanChooseMove?(index, slot, false)
+      legal = slot < 0 ? !pbCanChooseAnyMove?(index) : pbCanChooseMove?(index, slot, false)
       raise AnilCoop::BattleStopped, "movimiento no válido" unless legal && move
       rule = move.pbTarget(b)
       target = canonical_index(target)
