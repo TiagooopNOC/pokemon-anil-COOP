@@ -430,12 +430,15 @@ module AnilCoop
       online_team_receive(message) if respond_to?(:online_team_receive)
     when "invite_offer", "invite_state"
       online_invite_receive(message) if respond_to?(:online_invite_receive)
+    when "pvp_prepare", "pvp_start", "pvp_cancel"
+      pvp_receive(message)
     when "trainer_state"
       @trainer_states[[message["map"], message["event"]]] = message
       log("trainer state map=#{message["map"]} event=#{message["event"]} phase=#{message["phase"]} players=#{message["participants"].length}")
     when "trainer_closed"
       @trainer_states.delete([message["map"], message["event"]])
     when "battle_step", "battle_abort"
+      pvp_receive(message) if message["type"] == "battle_abort"
       battle_receive(message) if respond_to?(:battle_receive)
     when "pong"
       battle_wait_status(message) if respond_to?(:battle_wait_status)

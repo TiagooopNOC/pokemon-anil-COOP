@@ -31,6 +31,7 @@ class AnilCoopOnlineScreen
       Graphics.update
       Input.update
       AnilCoop.tick($scene)
+      break if AnilCoop.pvp_preparing?
       refresh_status
       rebuild_options
       visual = [AnilCoop.connected?, @mode, @selected_peer, @selected,

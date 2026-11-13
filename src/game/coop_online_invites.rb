@@ -1,4 +1,4 @@
-# Session-scoped invitations only. Acceptance does not transfer or start PvP.
+# Session-scoped invitations. A negotiated PvP invitation opens preparation.
 require "securerandom"
 module AnilCoop
   INVITE_NAMES = { "trade" => "intercambio", "pvp" => "combate PvP" }.freeze
@@ -12,12 +12,13 @@ module AnilCoop
     if message["type"] == "invite_offer"
       kind, sender = message.values_at("kind", "from")
       return unless INVITE_NAMES.key?(kind) && @peers.key?(sender)
-      @incoming_invites[request] = { from: sender, name: message["name"].to_s, kind: kind }
+      @incoming_invites[request] = { from: sender, name: message["name"].to_s, kind: kind,
+                                     pvp: pvp_enabled? && message["pvp"] == "singles-v1" }
     elsif message["type"] == "invite_state"
       status = message["status"]
       return if status == "pending"
       if (outgoing = @outgoing_invites.delete(request))
-        @invite_updates << [outgoing, status]
+        @invite_updates << [outgoing, status] unless status == "accepted" && message["pvp"] == "singles-v1"
       end
       @incoming_invites.delete(request)
     end
@@ -36,8 +37,10 @@ module AnilCoop
     @outgoing_invites ||= {}
     @outgoing_invites[request] = { peer: peer_id, kind: kind,
                                    name: @peers[peer_id]["name"].to_s }
-    queue(type: "invite_request", request: request, target: peer_id, kind: kind)
-    pbMessage("Invitación de #{INVITE_NAMES[kind]} enviada. Aceptarla aún no inicia esa actividad.") { tick($scene) }
+    packet = { type: "invite_request", request: request, target: peer_id, kind: kind }
+    packet[:pvp] = "singles-v1" if kind == "pvp" && pvp_enabled?
+    queue(**packet)
+    pbMessage("Invitación de #{INVITE_NAMES[kind]} enviada.") { tick($scene) }
   end
 
   def self.online_invite_cancel(request)
@@ -54,6 +57,7 @@ module AnilCoop
     @outgoing_invites = {}
     @invite_updates = []
     @invite_modal = false
+    @pvp_offer = @pvp_unavailable = nil
   end
 
   def self.online_invite_poll
@@ -70,8 +74,10 @@ module AnilCoop
         choice = pbMessage("#{name} te invita a un #{INVITE_NAMES[invite[:kind]]}.",
                            ["Aceptar", "Rechazar"], 1) { tick($scene) }
         if @incoming_invites.delete(request) && @peers.key?(invite[:from])
-          queue(type: "invite_reply", request: request, accept: choice == 0)
-          if choice == 0
+          packet = { type: "invite_reply", request: request, accept: choice == 0 }
+          packet[:pvp] = "singles-v1" if invite[:pvp]
+          queue(**packet)
+          if choice == 0 && !invite[:pvp]
             pbMessage("Aceptaste. Esta función todavía no está disponible.") { tick($scene) }
           end
         else
@@ -100,6 +106,7 @@ module AnilCoopInviteTick
   def tick(scene)
     super
     online_invite_poll if respond_to?(:online_invite_poll)
+    pvp_poll
   end
 end
 AnilCoop.singleton_class.prepend(AnilCoopInviteTick)

@@ -27,6 +27,7 @@ GAME_SCRIPTS = (
     "coop_online_map.rb",
     "coop_online_team.rb",
     "coop_online_invites.rb",
+    "coop_pvp.rb",
     "online_invite_qa.rb",
     "online_team_qa.rb",
     "online_qa.rb",

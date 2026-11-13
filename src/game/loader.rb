@@ -15,6 +15,7 @@ begin
   load "CoopDev/coop_online_map.rb"
   load "CoopDev/coop_online_team.rb"
   load "CoopDev/coop_online_invites.rb"
+  load "CoopDev/coop_pvp.rb"
   load "CoopDev/online_invite_qa.rb" if ENV["ANIL_COOP_INVITE_QA"] == "1"
   load "CoopDev/online_team_qa.rb" if ENV["ANIL_COOP_ONLINE_TEAM_QA"] == "1"
   load "CoopDev/online_qa.rb" if ENV["ANIL_COOP_ONLINE_QA"] == "1"
