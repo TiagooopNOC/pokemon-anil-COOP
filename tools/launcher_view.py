@@ -78,8 +78,8 @@ class ClassicMenuView:
         self.retry = ttk.Button(panel, text="Reintentar", style="Classic.Setup.TButton", command=retry)
         self.retry.grid(row=6, sticky="new", padx=inset, pady=(self.px(4), 0))
         self.retry.grid_remove()
-        tk.Label(panel, text="Pokémon Añil v4.14", font=self.face("Segoe UI", 13), fg=INK,
-                 bg="#d2e4ee", highlightbackground="#9db7c8", highlightthickness=1,
+        tk.Label(panel, text="Pokémon Añil v4.14", font=self.face("Segoe UI", 13), fg="#46627e",
+                 bg=PANEL,
                  anchor="w", padx=self.px(10), pady=self.px(6)).grid(
                      row=7, sticky="ew", padx=inset, pady=(self.px(9), self.px(13)))
 
