@@ -9,6 +9,9 @@ __pycache__/
 *.dll
 *.rxdata
 *.png
+!/assets/windows-launcher/panorama.png
+!/assets/windows-launcher/corner-left.png
+!/assets/windows-launcher/corner-right.png
 *.jpg
 *.ogg
 *.mp3
