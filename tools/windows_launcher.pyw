@@ -14,7 +14,7 @@ if not getattr(sys, "frozen", False):
 
 from src.server import session_server
 from tools.h0 import ROOT, SafetyError, no_links
-from tools.launcher_view import AdventureView
+from tools.launcher_view import ClassicMenuView
 from tools.windows_install import install, installed_client, play
 
 
@@ -41,8 +41,8 @@ class Launcher:
         self.close_after_play = False
         self.retry_action = None
         root.protocol("WM_DELETE_WINDOW", self.close)
-        self.view = AdventureView(root, ROOT / "assets/windows-launcher", TITLE,
-                                  self.choose, lambda: self.retry_action(), self.play)
+        self.view = ClassicMenuView(root, ROOT / "assets/windows-launcher", TITLE,
+                                    self.choose, lambda: self.retry_action(), self.play)
 
         self.check()
         root.after(40, self.poll)

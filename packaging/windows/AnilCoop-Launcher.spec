@@ -11,9 +11,7 @@ assets = [
     (str(root / "src/bootstrap/isolate.rb"), "src/bootstrap"),
     *((str(root / "src/game" / script), "src/game") for script in GAME_SCRIPTS),
     *((str(artwork / name), "assets/windows-launcher")
-      for name in ("panorama.png", "corner-left.png", "corner-right.png")),
-    *((str(artwork / name), "assets/windows-launcher")
-      for name in ("pikachu-ash.png", "eevee.png") if (artwork / name).is_file()),
+      for name in ("panorama.png", "anil-coop.ico")),
 ]
 
 analysis = Analysis(
@@ -27,6 +25,7 @@ launcher = EXE(
     name="AnilCoop-Launcher",
     exclude_binaries=True,
     console=False,
+    icon=str(artwork / "anil-coop.ico"),
     upx=False,
 )
 bundle = COLLECT(launcher, analysis.binaries, analysis.datas, name="AnilCoop-Launcher", upx=False)

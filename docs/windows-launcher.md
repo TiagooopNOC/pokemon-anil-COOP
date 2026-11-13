@@ -44,13 +44,10 @@ El paquete se compila desde una lista explícita de recursos del mod.
 
 ## Arte del launcher
 
-El paisaje nocturno y la vegetación de las esquinas se dibujaron para este
-launcher. La escena mantiene su proporción al cambiar el tamaño de la ventana.
-El panel reserva un lugar a cada lado de **JUGAR**. Para incluir sprites propios
-o autorizados, guardá PNG transparentes como `pikachu-ash.png` y `eevee.png` en
-`assets/windows-launcher/` antes de compilar. PyInstaller los incluye si existen.
-También podés agregarlos a `_internal/assets/windows-launcher/` dentro del
-paquete extraído.
+El menú clásico combina una cabecera azul, un paisaje diurno en pixel art
+y un panel de comandos. La escena mantiene su proporción al cambiar el tamaño
+de la ventana. El logo proporcionado para el proyecto se incluye como
+`assets/windows-launcher/anil-coop.ico` y se usa en la ventana y el ejecutable.
 
 ## Integración
 
