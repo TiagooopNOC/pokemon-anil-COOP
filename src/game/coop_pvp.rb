@@ -12,6 +12,14 @@ class AnilCoopDuelSelection < AnilCoopTeamSelection
   end
 end
 
+module AnilCoopDuelMenuTransport
+  def update_battle_menu
+    super
+    check_battle_transport! if @pvp_running
+  end
+end
+AnilCoop.singleton_class.prepend(AnilCoopDuelMenuTransport)
+
 # Native Singles with Cable Club's mirrored ordering and Co-op's room transport.
 class AnilCoopDuel < Battle_CableClub
   def initialize(scene, parties, trainers, owner, seed)
@@ -25,6 +33,10 @@ class AnilCoopDuel < Battle_CableClub
     @z_rng = ZCable::BattleRNG.new(seed)
     @items = [[]]
     @ally_items = [[]]
+    # Use a shared neutral arena. Map/weather from either save must not affect
+    # gameplay when the players are standing in different locations.
+    @backdrop = "indoor1"
+    @showAnims = true
   end
 
   def pbCanMegaEvolve?(*); false; end
@@ -243,13 +255,19 @@ module AnilCoop
     team = choose_pvp_team
     return unless team
     queue(type: "pvp_ready", battle: @active_battle, team: team, trainer: trainer_snapshot)
-    waiting = Window_AdvancedTextPokemon.new("Equipo listo. Esperando al rival… (X para cancelar)") unless @qa_pvp
+    unless @qa_pvp
+      waiting = Window_AdvancedTextPokemon.new("Equipo listo. Esperando al rival… (X para cancelar)")
+      waiting.width = Graphics.width
+      waiting.y = Graphics.height - waiting.height
+      waiting.z = 99999
+    end
     until @pvp_start
       battle_tick
       check_battle_transport!
       return if Input.trigger?(Input::BACK)
       Graphics.update
       Input.update
+      waiting&.update
     end
     waiting&.dispose
     waiting = nil
@@ -298,6 +316,7 @@ module AnilCoop
     @last_pvp_result = { error: error.message, complete: false }
     log("PvP: #{error.class}: #{error.message}\n#{error.backtrace.first(8).join("\n")}")
     result = "Duelo cancelado. #{error.message}"
+    result = "Duelo cancelado por desconexión." if ["battle_disconnect", "connection lost"].include?(error.message)
   ensure
     waiting&.dispose
     if @active_battle && !@battle_completed && connected?
