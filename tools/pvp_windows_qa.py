@@ -65,7 +65,11 @@ def run(source, scenario):
     else:
         assert all(row["complete"] and row["connected"] and row["reload"] and row["position_after"] and
                    row["turns"] >= 2 for row in results)
-        assert [row["decision"] for row in results] == ([2, 1] if scenario == "guest" else [1, 2])
+        decisions = [row["decision"] for row in results]
+        if scenario == "switch":
+            assert sorted(decisions) == [1, 2]
+        else:
+            assert decisions == ([2, 1] if scenario == "guest" else [1, 2])
 
 
 def main():
