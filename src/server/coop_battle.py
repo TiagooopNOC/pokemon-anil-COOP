@@ -243,6 +243,9 @@ class BattleExchange:
         self.pending[player] = {"stage": stage, "digest": digest, "command": command}
         if len(self.pending) < 2:
             return None, None
+        return None, self.complete(stage, digest)
+
+    def complete(self, stage, digest):
         packet = {"type": "battle_step", "battle": self.id, "seq": self.seq,
                   "stage": stage, "digest": digest,
                   "commands": [self.pending[p]["command"] for p in self.players],
@@ -252,4 +255,4 @@ class BattleExchange:
         self.turn += 1 if stage == "turn" else 0
         self.last_completed = time.monotonic()
         self.pending.clear()
-        return None, packet
+        return packet

@@ -15,8 +15,10 @@ import time
 
 if __package__:
     from .coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, DIGEST, validate_team, validate_trainer, validate_view_team
+    from .pvp import Duel, PROTOTYPE as PVP_PROTOTYPE
 else:
     from coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, DIGEST, validate_team, validate_trainer, validate_view_team
+    from pvp import Duel, PROTOTYPE as PVP_PROTOTYPE
 
 MAX_LINE = 32768  # Bounded personal-team snapshots; no binary game objects.
 MAX_PLAYERS = 4
@@ -68,7 +70,7 @@ class State:
                     if code in self.rooms:
                         return {"type": "error", "reason": "session_exists"}, None
                     self.rooms[code] = {"members": {}, "next_slot": 1, "trainers": {},
-                                        "view_requests": {}, "invites": {},
+                                        "view_requests": {}, "invites": {}, "duels": {},
                                         "host": None, "speed": 0}
                 room = self.rooms.get(code)
                 if not room:
@@ -125,7 +127,7 @@ class State:
                     target = message.get("target")
                     invite_kind = message.get("kind")
                     recipient = room["members"].get(target) if isinstance(target, str) else None
-                    if (message.keys() != {"type", "request", "target", "kind"} or
+                    if (message.keys() - {"pvp"} != {"type", "request", "target", "kind"} or
                             not isinstance(invite_kind, str) or invite_kind not in INVITE_KINDS or not recipient or
                             recipient["sock"] is None or target == player_id or
                             invite_id in invites or len(invites) >= 8 or
@@ -133,13 +135,15 @@ class State:
                                 (player_id, target, invite_kind) for entry in invites.values())):
                         return {"type": "invite_state", "request": invite_id,
                                 "status": "unavailable"}, identity
-                    invite = {"from": player_id, "to": target, "kind": invite_kind,
+                    duel_offer = invite_kind == "pvp" and message.get("pvp") == PVP_PROTOTYPE
+                    invite = {"from": player_id, "to": target, "kind": invite_kind, "pvp": duel_offer,
                               "created": now}
                     invites[invite_id] = invite
                     try:
                         self.send_one(recipient["sock"], {"type": "invite_offer",
                                       "request": invite_id, "from": player_id,
-                                      "name": player["name"], "kind": invite_kind})
+                                      "name": player["name"], "kind": invite_kind,
+                                      **({"pvp": PVP_PROTOTYPE} if duel_offer else {})})
                     except OSError:
                         del invites[invite_id]
                         return {"type": "invite_state", "request": invite_id,
@@ -149,13 +153,23 @@ class State:
                             "peer": target}, identity
                 invite = invites.get(invite_id)
                 if kind == "invite_reply":
-                    if (message.keys() != {"type", "request", "accept"} or not invite or
+                    if (message.keys() - {"pvp"} != {"type", "request", "accept"} or not invite or
                             invite["to"] != player_id or type(message["accept"]) is not bool):
                         return {"type": "invite_state", "request": invite_id,
                                 "status": "invalid"}, identity
                     status = "accepted" if message["accept"] else "declined"
                     del invites[invite_id]
+                    invite["pvp"] = invite["pvp"] and message.get("pvp") == PVP_PROTOTYPE
                     self.invite_notify(room, invite_id, invite, status)
+                    if message["accept"] and invite["pvp"]:
+                        players = (invite["from"], invite["to"])
+                        duel = Duel(players)
+                        if any(self.battle_busy(room, p) or not room["members"][p]["sock"] for p in players):
+                            self.battle_notify(room, {"battle": duel}, {"type": "pvp_cancel", "reason": "battle_busy"})
+                        else:
+                            room["duels"][duel.id] = duel
+                            self.battle_notify(room, {"battle": duel}, {"type": "pvp_prepare",
+                                               "request": invite_id, "battle": duel.id, "players": list(players)})
                     return None, identity
                 if kind == "invite_cancel":
                     if message.keys() != {"type", "request"} or not invite or invite["from"] != player_id:
@@ -221,7 +235,25 @@ class State:
                     return None, identity
                 return {"type": "team_view_error", "request": request_id,
                         "reason": "invalid_request"}, identity
-            if kind in ("battle_step", "battle_abort"):
+            if kind in ("pvp_ready", "battle_step", "battle_abort"):
+                battle_id = message.get("battle")
+                duel = room["duels"].get(battle_id) if isinstance(battle_id, str) else None
+                if duel:
+                    if player_id not in duel.players:
+                        return {"type": "error", "reason": "battle_not_participant"}, identity
+                    if kind == "battle_abort":
+                        self.duel_close(room, duel, "battle_cancelled")
+                    else:
+                        error, packet = (duel.ready if kind == "pvp_ready" else duel.submit)(player_id, message)
+                        if error:
+                            self.duel_close(room, duel, error)
+                        elif packet:
+                            self.battle_notify(room, {"battle": duel}, packet)
+                            if packet.get("stage") == "result":
+                                self.duel_close(room, duel, None)
+                    return None, identity
+                if kind == "pvp_ready":
+                    return {"type": "error", "reason": "battle_not_participant"}, identity
                 found = next(((k, e) for k, e in room["trainers"].items()
                               if e.get("battle") and e["battle"].id == message.get("battle")), None)
                 if not found or player_id not in found[1]["battle"].players:
@@ -244,8 +276,7 @@ class State:
                     return {"type": "error", "reason": "speed_not_host"}, identity
                 if type(speed) is not int or speed not in (0, 1, 2):
                     return {"type": "error", "reason": "invalid_speed"}, identity
-                if any(e.get("battle") and player_id in e["battle"].players
-                       for e in room["trainers"].values()):
+                if self.battle_busy(room, player_id):
                     return {"type": "error", "reason": "speed_battle_locked"}, identity
                 room["speed"] = speed
                 active_speed = sum(p["sock"] is not None for p in room["members"].values()) >= 2
@@ -329,6 +360,9 @@ class State:
                 self.broadcast(room, {"type": "position", "player": self.public(player)}, except_sock=sock)
                 return None, identity
             if kind == "ping":
+                for duel in room["duels"].values():
+                    if player_id in duel.players:
+                        return {"type": "pong", "battle": duel.id, "diagnostic": duel.diagnostic()}, identity
                 for encounter in room["trainers"].values():
                     battle = encounter.get("battle")
                     if battle and player_id in battle.players:
@@ -336,6 +370,8 @@ class State:
                                 "diagnostic": battle.diagnostic()}, identity
                 return {"type": "pong"}, identity
             if kind == "trainer_wait":
+                if any(player_id in duel.players for duel in room["duels"].values()):
+                    return {"type": "error", "reason": "coop_battle_pending"}, identity
                 map_id, event_id, forced = message.get("map"), message.get("event"), message.get("forced")
                 if type(map_id) is not int or type(event_id) is not int or type(forced) is not bool or not 1 <= map_id <= 9999 or not 1 <= event_id <= 9999:
                     return {"type": "error", "reason": "invalid_trainer"}, identity
@@ -433,6 +469,8 @@ class State:
                 if not message["solo"]:
                     selected += [pid for pid, entry in encounter["participants"].items()
                                  if pid != player_id and entry["ready"]]
+                if any(self.battle_busy(room, pid) for pid in selected):
+                    return {"type": "error", "reason": "coop_battle_pending"}, identity
                 if len(selected) != 1:
                     prototype = encounter["participants"][player_id].get("prototype")
                     if (len(selected) != 2 or (prototype == PROTOTYPE and event_id != 9000) or
@@ -517,9 +555,22 @@ class State:
     def send_one(sock, message):
         sock.sendall((json.dumps(message, separators=(",", ":")) + "\n").encode())
 
+    @staticmethod
+    def battle_busy(room, player_id):
+        return (any(player_id in duel.players for duel in room["duels"].values()) or
+                any(e.get("battle") and player_id in e["battle"].players for e in room["trainers"].values()))
+
+    def duel_close(self, room, duel, reason):
+        del room["duels"][duel.id]
+        if reason:
+            self.battle_notify(room, {"battle": duel}, {"type": "battle_abort", "battle": duel.id,
+                                                        "reason": reason})
+
     def invite_notify(self, room, invite_id, invite, status):
         packet = {"type": "invite_state", "request": invite_id,
                   "status": status, "kind": invite["kind"]}
+        if invite["pvp"] and status == "accepted":
+            packet["pvp"] = PVP_PROTOTYPE
         for player_id in (invite["from"], invite["to"]):
             player = room["members"].get(player_id)
             if player and player["sock"]:
@@ -553,6 +604,9 @@ class State:
             if player and player["sock"] is sock:
                 player["sock"] = None
                 player["position"] = None
+                for duel in list(room["duels"].values()):
+                    if player["id"] in duel.players:
+                        self.duel_close(room, duel, "battle_disconnect")
                 for invite_id, invite in list(room["invites"].items()):
                     if player["id"] not in (invite["from"], invite["to"]):
                         continue
