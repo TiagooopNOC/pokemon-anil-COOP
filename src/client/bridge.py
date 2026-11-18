@@ -8,12 +8,13 @@ import threading
 
 from src.server.session_server import LOCAL_SECRET, private_bind
 
-MAX_LINE = 32768  # Same bound as the server for selected-team snapshots.
+MAX_LINE = 196608  # Same bound as the server for structured trade records.
 
 
 def proof(secret, nonce, message):
     fields = (nonce, message.get("type", ""), message.get("session", ""),
-              message.get("name", ""), message.get("resume", ""))
+              message.get("name", ""), message.get("resume", ""),
+              message.get("profile", ""))
     if not all(isinstance(x, str) for x in fields):
         raise ValueError("invalid hello")
     return hmac.new(secret.encode(), "\n".join(fields).encode(), hashlib.sha256).hexdigest()

@@ -29,7 +29,8 @@ class TradeJournal:
                 pass
             else:
                 os.close(fd)
-        self.db = sqlite3.connect(self.path, isolation_level=None)
+        # State.lock serializes access from the threaded session server.
+        self.db = sqlite3.connect(self.path, isolation_level=None, check_same_thread=False)
         self.db.execute("PRAGMA journal_mode=DELETE")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.execute("PRAGMA foreign_keys=ON")
@@ -133,6 +134,15 @@ class TradeJournal:
             self.db.execute("UPDATE trades SET decision='commit' WHERE txid=?", (txid,))
         return "commit"
 
+    def decide_abort(self, txid: str):
+        """Abort only before the irreversible commit point."""
+        with self._atomic():
+            record = self.get(txid)
+            if record is None or record["decision"] not in (None, "abort"):
+                raise ValueError("cannot reverse a committed transaction")
+            self.db.execute("UPDATE trades SET decision='abort' WHERE txid=?", (txid,))
+        return "abort"
+
     def mark_applied(self, txid: str, player: str):
         with self._atomic():
             record = self.get(txid)
@@ -142,10 +152,19 @@ class TradeJournal:
             column = "first_applied" if index == 0 else "second_applied"
             self.db.execute(f"UPDATE trades SET {column}=1 WHERE txid=?", (txid,))
 
+    def mark_aborted(self, txid: str, player: str):
+        with self._atomic():
+            record = self.get(txid)
+            index = self._index(record, player)
+            if record["decision"] != "abort":
+                raise ValueError("no durable abort decision")
+            column = "first_applied" if index == 0 else "second_applied"
+            self.db.execute(f"UPDATE trades SET {column}=1 WHERE txid=?", (txid,))
+
     def pending_for(self, player: str):
         if not isinstance(player, str) or not HEX32.fullmatch(player):
             raise ValueError("invalid stable player id")
         rows = self.db.execute("""SELECT txid FROM trades WHERE
-            (first_player=? AND first_applied=0) OR (second_player=? AND second_applied=0)
+            (first_player=? OR second_player=?) AND (first_applied=0 OR second_applied=0)
             ORDER BY rowid""", (player, player)).fetchall()
         return [self.get(row[0]) for row in rows]

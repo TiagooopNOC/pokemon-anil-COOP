@@ -16,11 +16,13 @@ import time
 if __package__:
     from .coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, DIGEST, validate_team, validate_trainer, validate_view_team
     from .trade_preview import TradePreview
+    from .trade_journal import TradeJournal
 else:
     from coop_battle import BattleExchange, PROTOTYPE, PERSONAL_PROTOTYPE, DIGEST, validate_team, validate_trainer, validate_view_team
     from trade_preview import TradePreview
+    from trade_journal import TradeJournal
 
-MAX_LINE = 32768  # Bounded personal-team snapshots; no binary game objects.
+MAX_LINE = 196608  # Two bounded structured Pokémon records plus protocol envelope.
 MAX_PLAYERS = 4
 VALID_CODE = re.compile(r"[A-Z0-9]{6,12}\Z")
 VALID_NAME = re.compile(r"[\w -]{1,24}\Z", re.UNICODE)
@@ -44,16 +46,18 @@ def private_bind(address):
 
 def proof(secret, nonce, message):
     fields = (nonce, message.get("type", ""), message.get("session", ""),
-              message.get("name", ""), message.get("resume", ""))
+              message.get("name", ""), message.get("resume", ""),
+              message.get("profile", ""))
     if not all(isinstance(x, str) for x in fields):
         return None
     return hmac.new(secret.encode(), "\n".join(fields).encode(), hashlib.sha256).hexdigest()
 
 
 class State:
-    def __init__(self):
+    def __init__(self, journal=None):
         self.lock = threading.RLock()
         self.rooms = {}
+        self.trade_journal = journal
 
     def handle(self, sock, message, identity):
         if not isinstance(message, dict) or not isinstance(message.get("type"), str):
@@ -65,6 +69,9 @@ class State:
                     return {"type": "error", "reason": "already_joined"}, identity
                 code = message.get("session")
                 name = message.get("name")
+                profile = message.get("profile")
+                if profile is not None and (not isinstance(profile, str) or not VALID_TRADE_ID.fullmatch(profile)):
+                    return {"type": "error", "reason": "invalid_profile"}, None
                 if not isinstance(code, str) or not VALID_CODE.fullmatch(code) or not isinstance(name, str) or not VALID_NAME.fullmatch(name):
                     return {"type": "error", "reason": "invalid_identity"}, None
                 if kind == "create":
@@ -80,6 +87,10 @@ class State:
                 if resume is not None and not isinstance(resume, str):
                     return {"type": "error", "reason": "invalid_resume"}, None
                 existing = next((p for p in room["members"].values() if p["token"] == resume), None) if resume else None
+                if existing and profile is not None and existing.get("profile") != profile:
+                    return {"type": "error", "reason": "profile_mismatch"}, None
+                if not existing and profile:
+                    existing = next((p for p in room["members"].values() if p.get("profile") == profile), None)
                 active = sum(p["sock"] is not None for p in room["members"].values())
                 if existing and existing["sock"] is not None:
                     return {"type": "error", "reason": "already_connected"}, None
@@ -93,7 +104,8 @@ class State:
                     used = {p["slot"] for p in room["members"].values() if p["sock"] is not None}
                     slot = next(i for i in range(1, MAX_PLAYERS + 1) if i not in used)
                     player = {"id": secrets.token_hex(8), "token": secrets.token_hex(16), "slot": slot,
-                              "name": name, "sock": sock, "position": None, "last": time.monotonic(), "seq": -1}
+                              "name": name, "profile": profile, "sock": sock,
+                              "position": None, "last": time.monotonic(), "seq": -1}
                     room["members"][player["id"]] = player
                 identity = (code, player["id"])
                 if kind == "create":
@@ -103,9 +115,11 @@ class State:
                 self.broadcast(room, {"type": "enter", "player": self.public(player),
                                       "host": room["host"], "speed": room["speed"],
                                       "speed_active": active_speed}, except_sock=sock)
+                pending = self.trade_journal.pending_for(profile) if self.trade_journal and profile else []
                 return {"type": "welcome", "session": code, "id": player["id"], "slot": player["slot"],
                         "resume": player["token"], "peers": peers, "host": room["host"],
-                        "speed": room["speed"], "speed_active": active_speed}, identity
+                        "speed": room["speed"], "speed_active": active_speed,
+                        "pending_trade": pending[0] if pending else None}, identity
             if not identity:
                 return {"type": "error", "reason": "join_first"}, None
             code, player_id = identity
@@ -120,12 +134,29 @@ class State:
                 del room["invites"][invite_id]
                 self.invite_notify(room, invite_id, invite, "expired")
             for trade_id, trade in list(room["trades"].items()):
-                if now - trade.updated > 300:
+                if now - trade.updated > 300 and trade.phase not in ("commit", "complete"):
                     self.trade_close(room, trade_id, "expired")
             if kind.startswith("trade_"):
                 trade_id = message.get("trade")
                 if not isinstance(trade_id, str) or not VALID_TRADE_ID.fullmatch(trade_id):
                     return {"type": "trade_error", "trade": "", "reason": "invalid_trade"}, identity
+                if kind == "trade_status" and message.keys() == {"type", "trade"}:
+                    record = self.trade_journal.get(trade_id) if self.trade_journal else None
+                    if record and player.get("profile") in record["players"]:
+                        return {"type": "trade_recovery", **record}, identity
+                    return {"type": "trade_error", "trade": trade_id, "reason": "unavailable"}, identity
+                if kind == "trade_applied" and message.keys() == {"type", "trade"} and trade_id not in room["trades"]:
+                    record = self.trade_journal.get(trade_id) if self.trade_journal else None
+                    if record and record["decision"] == "commit" and player.get("profile") in record["players"]:
+                        self.trade_journal.mark_applied(trade_id, player["profile"])
+                        return {"type": "trade_recovery", **self.trade_journal.get(trade_id)}, identity
+                    return {"type": "trade_error", "trade": trade_id, "reason": "unavailable"}, identity
+                if kind == "trade_aborted" and message.keys() == {"type", "trade"}:
+                    record = self.trade_journal.get(trade_id) if self.trade_journal else None
+                    if record and record["decision"] == "abort" and player.get("profile") in record["players"]:
+                        self.trade_journal.mark_aborted(trade_id, player["profile"])
+                        return {"type": "trade_recovery", **self.trade_journal.get(trade_id)}, identity
+                    return {"type": "trade_error", "trade": trade_id, "reason": "unavailable"}, identity
                 trade = room["trades"].get(trade_id)
                 if not trade or player_id not in trade.players:
                     return {"type": "trade_error", "trade": trade_id, "reason": "unavailable"}, identity
@@ -141,11 +172,58 @@ class State:
                     if result is None:
                         return {"type": "trade_error", "trade": trade_id, "reason": "stale_offer"}, identity
                     if result:
-                        self.trade_close(room, trade_id, "preview_complete")
+                        if trade.transfer_enabled:
+                            self.trade_notify(room, trade)
+                        else:
+                            self.trade_close(room, trade_id, "preview_complete")
+                    else:
+                        self.trade_notify(room, trade)
+                    return None, identity
+                if kind == "trade_payload" and trade.transfer_enabled:
+                    if message.keys() != {"type", "trade", "payload"} or not trade.payload(player_id, message["payload"]):
+                        return {"type": "trade_error", "trade": trade_id, "reason": "invalid_payload"}, identity
+                    if len(trade.payloads) == 2:
+                        profiles = tuple(room["members"][p]["profile"] for p in trade.players)
+                        try:
+                            self.trade_journal.store_offers(trade.id, profiles,
+                                tuple(trade.payloads[p] for p in trade.players))
+                        except (ValueError, OSError):
+                            self.trade_close(room, trade_id, "cancelled")
+                            return {"type": "trade_error", "trade": trade_id, "reason": "durable_prepare_failed"}, identity
+                        trade.phase = "preparing"
+                    self.trade_notify(room, trade)
+                    return None, identity
+                if kind == "trade_prepared" and trade.phase == "preparing":
+                    if message.keys() != {"type", "trade", "own_digest", "incoming_digest"}:
+                        return {"type": "trade_error", "trade": trade_id, "reason": "invalid_prepare"}, identity
+                    try:
+                        self.trade_journal.mark_prepared(trade_id, player["profile"],
+                            message["own_digest"], message["incoming_digest"])
+                        record = self.trade_journal.get(trade_id)
+                        if record["prepared"] == (True, True):
+                            self.trade_journal.decide_commit(trade_id)
+                            trade.phase = "commit"
+                    except (ValueError, OSError):
+                        return {"type": "trade_error", "trade": trade_id, "reason": "invalid_prepare"}, identity
+                    self.trade_notify(room, trade)
+                    return None, identity
+                if kind == "trade_applied" and trade.phase in ("commit", "complete"):
+                    if message.keys() != {"type", "trade"}:
+                        return {"type": "trade_error", "trade": trade_id, "reason": "invalid_apply"}, identity
+                    try:
+                        self.trade_journal.mark_applied(trade_id, player["profile"])
+                        record = self.trade_journal.get(trade_id)
+                    except (ValueError, OSError):
+                        return {"type": "trade_error", "trade": trade_id, "reason": "invalid_apply"}, identity
+                    if record["applied"] == (True, True):
+                        trade.phase = "complete"
+                        self.trade_close(room, trade_id, "complete")
                     else:
                         self.trade_notify(room, trade)
                     return None, identity
                 if kind == "trade_cancel" and message.keys() == {"type", "trade"}:
+                    if trade.phase == "commit":
+                        return {"type": "trade_error", "trade": trade_id, "reason": "committed"}, identity
                     self.trade_close(room, trade_id, "cancelled")
                     return None, identity
                 return {"type": "trade_error", "trade": trade_id, "reason": "invalid_message"}, identity
@@ -195,7 +273,9 @@ class State:
                                for trade in room["trades"].values()):
                             status = "unavailable"
                         else:
-                            trade = TradePreview((invite["from"], invite["to"]))
+                            profiles = [room["members"][p].get("profile") for p in (invite["from"], invite["to"])]
+                            transferable = bool(self.trade_journal and all(profiles) and profiles[0] != profiles[1])
+                            trade = TradePreview((invite["from"], invite["to"]), transferable)
                             room["trades"][trade.id] = trade
                     del invites[invite_id]
                     self.invite_notify(room, invite_id, invite, status)
@@ -574,7 +654,13 @@ class State:
                     pass
 
     def trade_notify(self, room, trade, phase="choosing"):
-        packet = trade.state(phase)
+        packet = trade.state(None if phase == "choosing" else phase)
+        if trade.transfer_enabled and self.trade_journal:
+            record = self.trade_journal.get(trade.id)
+            if record:
+                packet["digests"] = {peer: record["digests"][i] for i, peer in enumerate(trade.players)}
+                packet["prepared"] = {peer: record["prepared"][i] for i, peer in enumerate(trade.players)}
+                packet["applied"] = {peer: record["applied"][i] for i, peer in enumerate(trade.players)}
         for player_id in trade.players:
             player = room["members"].get(player_id)
             if player and player["sock"]:
@@ -585,6 +671,10 @@ class State:
 
     def trade_close(self, room, trade_id, phase):
         trade = room["trades"].pop(trade_id)
+        if trade.transfer_enabled and self.trade_journal and phase != "complete":
+            record = self.trade_journal.get(trade.id)
+            if record and record["decision"] != "commit":
+                self.trade_journal.decide_abort(trade.id)
         self.trade_notify(room, trade, phase)
 
     @staticmethod
@@ -618,7 +708,7 @@ class State:
                     del room["invites"][invite_id]
                     self.invite_notify(room, invite_id, invite, "peer_left")
                 for trade_id, trade in list(room["trades"].items()):
-                    if player["id"] in trade.players:
+                    if player["id"] in trade.players and trade.phase != "commit":
                         self.trade_close(room, trade_id, "peer_left")
                 for request_id, entry in list(room["view_requests"].items()):
                     if player["id"] not in (entry["from"], entry["to"]):
@@ -707,6 +797,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bind", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=0)
+    parser.add_argument("--trade-journal", type=str)
     args = parser.parse_args()
     try:
         allowed = private_bind(args.bind)
@@ -717,6 +808,8 @@ def main():
     secret = os.environ.get("ANIL_COOP_SECRET")
     if not ipaddress.ip_address(args.bind).is_loopback and (not secret or len(secret) < 16):
         parser.error("ANIL_COOP_SECRET must contain at least 16 characters on a LAN/VPN")
+    global STATE
+    STATE = State(TradeJournal(args.trade_journal) if args.trade_journal else None)
     with Server((args.bind, args.port), Handler, secret or LOCAL_SECRET) as server:
         print(server.server_address[1], flush=True)
         server.serve_forever()

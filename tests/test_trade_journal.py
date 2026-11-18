@@ -54,11 +54,12 @@ class TradeJournalTest(unittest.TestCase):
         self.journal.mark_applied(self.tx, self.a)
         self.reopen()  # One client applied; the other is still pending.
         self.assertEqual(self.journal.get(self.tx)["applied"], (True, False))
-        self.assertEqual(self.journal.pending_for(self.a), [])
+        self.assertEqual(len(self.journal.pending_for(self.a)), 1)
         self.journal.mark_applied(self.tx, self.b)
         self.journal.mark_applied(self.tx, self.b)  # Idempotent acknowledgment.
         self.reopen()
         self.assertEqual(self.journal.get(self.tx)["applied"], (True, True))
+        self.assertEqual(self.journal.pending_for(self.a), [])
 
     def test_immutable_offers_and_no_unilateral_decision(self):
         self.journal.store_offers(self.tx, (self.a, self.b), self.offers)

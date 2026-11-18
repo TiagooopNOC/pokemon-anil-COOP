@@ -1,6 +1,7 @@
 # Presence prototype: only trainer coordinates cross the network; wild battles stay local.
 require "socket"
 require "json"
+require "digest"
 
 class AnilCoopRemoteCharacter < Game_Character
   def name; ""; end
@@ -222,6 +223,7 @@ module AnilCoop
     @out = +""
     role = @resume ? "join" : (ENV["ANIL_COOP_MODE"] == "create" ? "create" : "join")
     hello = { type: role, session: ENV["ANIL_COOP_SESSION"], name: ENV["ANIL_COOP_NAME"] || "Player" }
+    hello[:profile] = Digest::SHA256.hexdigest(AnilCoopDev::PROFILE_ID)[0, 32]
     hello[:resume] = @resume if @resume
     queue(hello)
     log("connected transport, mode=#{role}")
@@ -468,7 +470,7 @@ module AnilCoop
       break if chunk == :wait_readable
       raise EOFError if chunk.nil? || chunk.empty?
       @buffer << chunk
-      raise "oversize network message" if @buffer.bytesize > 65536
+      raise "oversize network message" if @buffer.bytesize > 262144
       while (index = @buffer.index("\n"))
         line = @buffer.slice!(0..index)
         receive(JSON.parse(line))
