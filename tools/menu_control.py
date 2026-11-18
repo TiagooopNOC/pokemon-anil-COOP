@@ -81,6 +81,9 @@ class MenuControl:
             return {"decision": data["decision"]}
         if operation == "trade_apply":
             return {"after_hash": self.storage.apply(txid)}
+        if operation == "trade_finish":
+            self.storage.finish(txid)
+            return {"completed": True}
         raise ValueError("Operación de intercambio inválida")
 
     def start(self, operation, host, code=""):

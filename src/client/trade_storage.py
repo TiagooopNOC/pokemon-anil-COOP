@@ -52,7 +52,8 @@ class TradeStorage:
             before_hash TEXT NOT NULL,
             after_hash TEXT NOT NULL,
             decision TEXT,
-            applied INTEGER NOT NULL DEFAULT 0
+            applied INTEGER NOT NULL DEFAULT 0,
+            completed INTEGER NOT NULL DEFAULT 0
         )""")
 
     def close(self):
@@ -86,10 +87,10 @@ class TradeStorage:
             return None
         return {"txid": row[0], "save_name": row[1], "candidate_name": row[2],
                 "before_hash": row[3], "after_hash": row[4],
-                "decision": row[5], "applied": bool(row[6])}
+                "decision": row[5], "applied": bool(row[6]), "completed": bool(row[7])}
 
     def pending(self):
-        rows = self.db.execute("SELECT txid FROM escrow WHERE applied=0 AND decision IS NOT 'abort'").fetchall()
+        rows = self.db.execute("SELECT txid FROM escrow WHERE completed=0 AND decision IS NOT 'abort'").fetchall()
         return [self.get(row[0]) for row in rows]
 
     def _lock(self, txid):
@@ -205,5 +206,13 @@ class TradeStorage:
             raise ValueError("installed save failed verification")
         with self._atomic():
             self.db.execute("UPDATE escrow SET applied=1 WHERE txid=?", (txid,))
-        self._unlock(txid)
         return record["after_hash"]
+
+    def finish(self, txid):
+        """Only after the server confirms that both saves were applied."""
+        with self._atomic():
+            record = self.get(txid)
+            if record is None or record["decision"] != "commit" or not record["applied"]:
+                raise ValueError("trade not locally applied")
+            self.db.execute("UPDATE escrow SET completed=1 WHERE txid=?", (txid,))
+        self._unlock(txid)

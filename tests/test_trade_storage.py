@@ -50,6 +50,9 @@ class TradeStorageTest(unittest.TestCase):
         self.reopen()  # Replacement happened; acknowledgment did not.
         self.assertEqual(self.storage.apply(self.tx), self.new_hash)
         self.assertEqual(self.storage.apply(self.tx), self.new_hash)
+        self.assertEqual(len(self.storage.pending()), 1)
+        self.assertTrue(self.storage.lock_path.exists())
+        self.storage.finish(self.tx)
         self.assertEqual(self.storage.pending(), [])
         self.assertFalse(self.storage.lock_path.exists())
 
@@ -86,6 +89,7 @@ class TradeStorageTest(unittest.TestCase):
         self.storage.apply(self.tx)
         with self.assertRaises(ValueError):
             self.storage.decide(self.tx, "abort")
+        self.storage.finish(self.tx)
 
     def test_abort_removes_candidate_and_startup_lock(self):
         self.prepare()
