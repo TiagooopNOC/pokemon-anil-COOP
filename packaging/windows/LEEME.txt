@@ -14,6 +14,7 @@ Para jugar 1v1, elegí a tu amigo en «Jugadores conectados» y pulsá
 «Desafiar a combate».
 
 La copia y sus partidas viven en %LOCALAPPDATA%\AnilCoop\local.
-Para actualizar el launcher, extraé el ZIP nuevo completo y abrilo.
+El launcher busca nuevas releases y ofrece «Actualizar» en su menú.
+Si este ZIP no muestra esa opción, extraé el ZIP nuevo completo y abrilo.
 Para crear un acceso directo, hacé clic derecho en el EXE y elegí
 Enviar a → Escritorio (crear acceso directo).

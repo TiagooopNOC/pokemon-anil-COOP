@@ -14,7 +14,7 @@ TRIM = "#6d9cc0"
 
 
 class ClassicMenuView:
-    def __init__(self, root, artwork, title, choose, retry, play, import_save):
+    def __init__(self, root, artwork, title, choose, retry, play, import_save, update):
         dpi = root.winfo_fpixels("1i") / 96
         self.scale = min(dpi, (root.winfo_screenheight() - 110) / 480,
                          (root.winfo_screenwidth() - 40) / 660)
@@ -51,7 +51,7 @@ class ClassicMenuView:
         # Wrapped text must not resize the grid column that sets its wrap width.
         panel.grid_propagate(False)
         panel.columnconfigure(0, weight=1)
-        panel.rowconfigure(7, weight=1)
+        panel.rowconfigure(8, weight=1)
         inset = self.px(17)
         self.status = tk.Label(panel, font=self.face("Bahnschrift", 26, "bold"),
                                fg=INK, bg=PANEL, anchor="w")
@@ -78,13 +78,16 @@ class ClassicMenuView:
         self.import_save = ttk.Button(panel, text="Importar partida guardada",
                                       style="Classic.Setup.TButton", command=import_save)
         self.import_save.grid(row=6, sticky="ew", padx=inset)
+        self.update = ttk.Button(panel, text="Buscar actualizaciones",
+                                 style="Classic.Setup.TButton", command=update)
+        self.update.grid(row=7, sticky="ew", padx=inset, pady=(self.px(4), 0))
         self.retry = ttk.Button(panel, text="Reintentar", style="Classic.Setup.TButton", command=retry)
-        self.retry.grid(row=7, sticky="new", padx=inset, pady=(self.px(4), 0))
+        self.retry.grid(row=8, sticky="new", padx=inset, pady=(self.px(4), 0))
         self.retry.grid_remove()
         tk.Label(panel, text="Pokémon Añil v4.14", font=self.face("Segoe UI", 13), fg="#46627e",
                  bg=PANEL,
                  anchor="w", padx=self.px(10), pady=self.px(6)).grid(
-                     row=8, sticky="ew", padx=inset, pady=(self.px(9), self.px(13)))
+                     row=9, sticky="ew", padx=inset, pady=(self.px(9), self.px(13)))
 
     @staticmethod
     def frame(parent, background, border):
@@ -130,7 +133,8 @@ class ClassicMenuView:
         self.hero.delete("all")
         self.hero.create_image(0, 0, image=self.hero.picture, anchor="nw")
 
-    def render(self, status, detail, *, installing, percent, selectable, playable, retryable, idle):
+    def render(self, status, detail, *, installing, percent, selectable, playable, retryable,
+               idle, update_tag=None, update_checking=False):
         self.status.configure(text=status, fg="#973e43" if status == "Error" else INK)
         self.detail.configure(text=detail)
         if installing:
@@ -142,6 +146,9 @@ class ClassicMenuView:
         self.import_save.configure(state="normal" if idle else "disabled")
         self.start.configure(state="normal" if playable else "disabled",
                              image=self.cursor_image if playable else "")
+        self.update.configure(state="normal" if idle and not update_checking else "disabled",
+                              text=("Buscando actualizaciones…" if update_checking else
+                                    f"Actualizar a {update_tag}" if update_tag else "Buscar actualizaciones"))
         if retryable:
             self.retry.grid()
         else:

@@ -8,6 +8,7 @@ from tools.install_presence import GAME_SCRIPTS
 artwork = root / "assets/windows-launcher"
 assets = [
     (str(root / "config/build.json"), "config"),
+    (str(root / "dist/windows/launcher-release.json"), "config"),
     (str(root / "src/bootstrap/isolate.rb"), "src/bootstrap"),
     *((str(root / "src/game" / script), "src/game") for script in GAME_SCRIPTS),
     *((str(artwork / name), "assets/windows-launcher")

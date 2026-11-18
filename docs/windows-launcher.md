@@ -16,6 +16,15 @@
    abrí primero el launcher del anfitrión y luego el del invitado: ambos intentan
    recuperar la misma transacción antes de cargar las partidas.
 
+El launcher busca releases nuevas en GitHub al abrirse. También podés pulsar
+**Buscar actualizaciones**; si encuentra una versión posterior, el botón pasa
+a **Actualizar a ...**. Descarga el ZIP oficial, comprueba su SHA-256 publicado,
+verifica su contenido y abre el nuevo launcher. La instalación original y las
+partidas permanecen en sus carpetas. Si el nuevo ejecutable no abre, el launcher
+anterior sigue disponible. La primera instalación de una versión que incluya
+este actualizador debe hacerse manualmente desde el ZIP; las versiones
+anteriores no pueden incorporar retroactivamente esta función.
+
 El ZIP incluye el runtime de Python, Tcl/Tk y el mod. Cada jugador aporta su propia
 instalación original. Podés crear un acceso directo desde el menú contextual del
 EXE con **Enviar a → Escritorio (crear acceso directo)**.
@@ -67,13 +76,16 @@ instalados para la compilación:
 ```powershell
 py -3.12 -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -r packaging/windows/launcher-requirements.txt
-./packaging/windows/Build-Launcher.ps1 -Python ./.venv/Scripts/python.exe
+./packaging/windows/Build-Launcher.ps1 -Python ./.venv/Scripts/python.exe -ReleaseTag v0.2.0-alpha
 ```
 
 Distribuí `dist/windows/AnilCoop-Launcher-win-x64.zip` completo. Es un paquete
 PyInstaller de carpeta única y subsistema gráfico. El EXE carga el runtime y
 los archivos del mod desde `_internal`. El script imprime el SHA-256 del ZIP.
 El paquete se compila desde una lista explícita de recursos del mod.
+Usá la etiqueta exacta de la release que vas a publicar; el build predeterminado
+queda marcado `development` y no anuncia actualizaciones para evitar instalar
+una versión pública sobre un checkout de desarrollo.
 [Documentación de PyInstaller](https://pyinstaller.org/en/stable/usage.html).
 
 ## Arte del launcher
