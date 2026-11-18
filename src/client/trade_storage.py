@@ -34,6 +34,7 @@ class TradeStorage:
         if not self.save_dir.is_dir():
             raise ValueError("missing isolated save directory")
         self.path = self.save_dir.parent / "trade-escrow.sqlite3"
+        self.lock_path = self.save_dir.parent / "trade-pending.lock"
         if not self.path.exists():
             try:
                 fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
@@ -91,6 +92,27 @@ class TradeStorage:
         rows = self.db.execute("SELECT txid FROM escrow WHERE applied=0 AND decision IS NOT 'abort'").fetchall()
         return [self.get(row[0]) for row in rows]
 
+    def _lock(self, txid):
+        if self.lock_path.exists():
+            if self.lock_path.read_text(encoding="ascii") != txid:
+                raise ValueError("another trade blocks this profile")
+            return
+        try:
+            fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            raise ValueError("another trade blocks this profile")
+        try:
+            os.write(fd, txid.encode("ascii"))
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    def _unlock(self, txid):
+        if self.lock_path.exists():
+            if self.lock_path.read_text(encoding="ascii") != txid:
+                raise ValueError("trade lock belongs to another transaction")
+            self.lock_path.unlink()
+
     def prepare(self, txid, save_name, candidate_name, before_hash):
         self._txid(txid)
         if not isinstance(save_name, str) or not SAVE_NAME.fullmatch(save_name):
@@ -107,10 +129,13 @@ class TradeStorage:
         after_hash = digest(candidate)
         if after_hash == before_hash:
             raise ValueError("candidate did not change save")
+        if any(record["txid"] != txid for record in self.pending()):
+            raise ValueError("another trade blocks this profile")
         # Candidate bytes were written by Ruby with flush/fsync before this call.
         # Reopen and fsync here as an independent durability check.
         with candidate.open("rb") as stream:
             os.fsync(stream.fileno())
+        self._lock(txid)  # Before durable receipt: a crash must block game startup.
         with self._atomic():
             self.db.execute("""INSERT OR IGNORE INTO escrow
                 (txid, save_name, candidate_name, before_hash, after_hash)
@@ -134,6 +159,25 @@ class TradeStorage:
             if record["applied"] and decision != "commit":
                 raise ValueError("cannot abort an applied trade")
             self.db.execute("UPDATE escrow SET decision=? WHERE txid=?", (decision, txid))
+        if decision == "abort":
+            self.finish_abort(txid)
+
+    def finish_abort(self, txid):
+        record = self.get(txid)
+        if record is None or record["decision"] != "abort" or record["applied"]:
+            raise ValueError("no durable abort decision")
+        candidate = self._file(record["candidate_name"])
+        if candidate.is_file():
+            if digest(candidate) != record["after_hash"]:
+                raise ValueError("candidate changed during abort")
+            candidate.unlink()
+        self._unlock(txid)
+
+    def clear_unprepared_lock(self, txid):
+        """Safe only when no durable local receipt exists for this transaction."""
+        if self.get(txid) is not None:
+            raise ValueError("prepared trade cannot be discarded")
+        self._unlock(txid)
 
     def apply(self, txid, *, after_replace=None):
         """Idempotent. Never replaces a changed original or a symlink."""
@@ -161,4 +205,5 @@ class TradeStorage:
             raise ValueError("installed save failed verification")
         with self._atomic():
             self.db.execute("UPDATE escrow SET applied=1 WHERE txid=?", (txid,))
+        self._unlock(txid)
         return record["after_hash"]

@@ -43,6 +43,7 @@ def main() -> int:
     parser.add_argument("--qa-online-invites", action="store_true", help="Check targeted invitations in two native engines")
     parser.add_argument("--qa-trade-preview", action="store_true", help="Check visual trade negotiation without transfers")
     parser.add_argument("--qa-trade-data", action="store_true", help="Check complete Pokémon round trips without transfers")
+    parser.add_argument("--qa-trade-candidate", choices=("create", "reload"), help="Check an isolated disposable trade save")
     parser.add_argument("--qa-story-inspect", action="store_true", help="Inspect original rival events read-only")
     parser.add_argument("--play", action="store_true", help="Run until the player closes the game")
     parser.add_argument("--coop-battles", action="store_true")
@@ -127,6 +128,9 @@ def main() -> int:
         if args.qa_trade_data and (profile / "qa-trade-data-result.json").exists():
             (profile / "qa-trade-data-result.json").rename(
                 profile / "logs" / ("previous-" + uuid.uuid4().hex + "-qa-trade-data-result.json"))
+        if args.qa_trade_candidate and (profile / "qa-trade-candidate-result.json").exists():
+            (profile / "qa-trade-candidate-result.json").rename(
+                profile / "logs" / ("previous-" + uuid.uuid4().hex + "-qa-trade-candidate-result.json"))
     slot_tool = args.gameslot.resolve()
     if not slot_tool.is_file():
         raise SafetyError("Reviewed GameSlot path is missing")
@@ -167,6 +171,7 @@ def main() -> int:
             run_env.pop("ANIL_COOP_INVITE_QA", None)
             run_env.pop("ANIL_COOP_TRADE_QA", None)
             run_env.pop("ANIL_COOP_TRADE_DATA_QA", None)
+            run_env.pop("ANIL_COOP_TRADE_CANDIDATE_QA", None)
             run_env.pop("ANIL_COOP_ONLINE_QA_ROLE", None)
             if online_scenarios:
                 control = MenuControl(ROOT, server_port=17641)
@@ -199,6 +204,8 @@ def main() -> int:
                 run_env["ANIL_COOP_SPEED_QA"] = "1"
             if args.qa_trade_data:
                 run_env["ANIL_COOP_TRADE_DATA_QA"] = "1"
+            if args.qa_trade_candidate:
+                run_env["ANIL_COOP_TRADE_CANDIDATE_QA"] = args.qa_trade_candidate
             if args.qa_story_inspect:
                 run_env["ANIL_COOP_STORY_QA"] = "inspect"
             if args.qa_2v2:
@@ -273,6 +280,10 @@ def main() -> int:
             for observation, client in zip(observations, plan):
                 report = Path(client["save_directory"]).parent / "qa-trade-data-result.json"
                 observation["trade_data_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
+        if args.qa_trade_candidate:
+            for observation, client in zip(observations, plan):
+                report = Path(client["save_directory"]).parent / "qa-trade-candidate-result.json"
+                observation["trade_candidate_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
         write_new(result_path, result)
         print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
         return 0 if all(item["bootstrap_observed"] and
@@ -283,6 +294,7 @@ def main() -> int:
                         (not args.qa_online_invites or item["invite_qa"]["pass"]) and
                         (not args.qa_trade_preview or item["trade_preview_qa"]["pass"]) and
                         (not args.qa_trade_data or item["trade_data_qa"]["pass"]) and
+                        (not args.qa_trade_candidate or item["trade_candidate_qa"]["pass"]) and
                         (not (args.qa_presence or args.qa_presence_network or args.qa_presence_labels or args.qa_presence_followers) or item["presence_qa"]["pass"])
                         for item in observations) else 2
     finally:

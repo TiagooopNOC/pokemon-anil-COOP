@@ -5,6 +5,7 @@ import hashlib
 import ipaddress
 import json
 import os
+from pathlib import Path
 import secrets
 import socket
 import socketserver
@@ -13,6 +14,7 @@ import sys
 import time
 
 from src.client.bridge import Bridge
+from src.client.trade_storage import TradeStorage
 from src.server.session_server import private_bind
 
 ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -36,9 +38,10 @@ def local_addresses():
 
 
 class MenuControl:
-    def __init__(self, root, *, server_port=17641):
+    def __init__(self, root, *, server_port=17641, profile=None):
         self.root = root
         self.server_port = server_port
+        self.storage = TradeStorage(Path(profile) / "saves") if profile else None
         self.server = None
         self.bridge = None
         self.session = None
@@ -56,6 +59,29 @@ class MenuControl:
                 self.server.wait()
             self.server = None
         self.session = None
+
+    def dispose(self):
+        self.close()
+        if self.storage:
+            self.storage.close()
+            self.storage = None
+
+    def trade_storage(self, operation, data):
+        if not self.storage:
+            raise ValueError("El perfil aislado no permite intercambios reales")
+        txid = data.get("trade")
+        if operation == "trade_pending":
+            return {"pending": self.storage.pending()}
+        if operation == "trade_prepare":
+            after = self.storage.prepare(txid, data.get("save_name"),
+                                         data.get("candidate_name"), data.get("before_hash"))
+            return {"after_hash": after}
+        if operation == "trade_decide":
+            self.storage.decide(txid, data.get("decision"))
+            return {"decision": data["decision"]}
+        if operation == "trade_apply":
+            return {"after_hash": self.storage.apply(txid)}
+        raise ValueError("Operación de intercambio inválida")
 
     def start(self, operation, host, code=""):
         if operation not in ("create", "join"):
@@ -115,6 +141,8 @@ class ControlHandler(socketserver.StreamRequestHandler):
             elif operation == "status":
                 result = {"ok": True, "session": self.server.control.session,
                           "addresses": local_addresses()}
+            elif isinstance(operation, str) and operation.startswith("trade_"):
+                result = {"ok": True, **self.server.control.trade_storage(operation, data)}
             else:
                 result = {"ok": True, **self.server.control.start(
                     operation, data.get("host"), data.get("code", ""))}
@@ -135,4 +163,4 @@ class ControlServer(socketserver.ThreadingTCPServer):
     def close(self):
         self.shutdown()
         self.server_close()
-        self.control.close()
+        self.control.dispose()

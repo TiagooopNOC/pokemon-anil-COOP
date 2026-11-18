@@ -34,6 +34,7 @@ class TradeStorageTest(unittest.TestCase):
     def test_interruptions_and_idempotent_recovery(self):
         self.assertEqual(self.storage.pending(), [])  # Before confirmation.
         self.assertEqual(self.prepare(), self.new_hash)
+        self.assertTrue(self.storage.lock_path.exists())
         self.reopen()  # After local preparation.
         self.assertIsNone(self.storage.get(self.tx)["decision"])
         self.assertEqual(digest(self.save), self.old_hash)
@@ -50,6 +51,7 @@ class TradeStorageTest(unittest.TestCase):
         self.assertEqual(self.storage.apply(self.tx), self.new_hash)
         self.assertEqual(self.storage.apply(self.tx), self.new_hash)
         self.assertEqual(self.storage.pending(), [])
+        self.assertFalse(self.storage.lock_path.exists())
 
     def test_only_one_prepared_player_cannot_apply(self):
         self.prepare()
@@ -84,6 +86,20 @@ class TradeStorageTest(unittest.TestCase):
         self.storage.apply(self.tx)
         with self.assertRaises(ValueError):
             self.storage.decide(self.tx, "abort")
+
+    def test_abort_removes_candidate_and_startup_lock(self):
+        self.prepare()
+        self.storage.decide(self.tx, "abort")
+        self.assertEqual(digest(self.save), self.old_hash)
+        self.assertFalse(self.candidate.exists())
+        self.assertFalse(self.storage.lock_path.exists())
+        self.assertEqual(self.storage.pending(), [])
+
+    def test_orphan_lock_before_local_prepare_can_be_cleared(self):
+        self.storage._lock(self.tx)
+        self.reopen()
+        self.storage.clear_unprepared_lock(self.tx)
+        self.assertFalse(self.storage.lock_path.exists())
 
     def test_reject_paths_outside_isolated_saves(self):
         with self.assertRaises(ValueError):

@@ -11,6 +11,8 @@ module AnilCoopDev
   raise "Invalid private save directory" unless SAVE_DIR == expected
   raise "Profile marker mismatch" unless
     File.read(File.join(PROFILE, "profile-id.txt")).strip == PROFILE_ID
+  raise "Pending co-op trade: start with the Co-op launcher to recover it" if
+    File.file?(File.join(PROFILE, "trade-pending.lock"))
 
   System.singleton_class.send(:define_method, :data_directory) { SAVE_DIR }
   raise "Save redirection failed" unless System.data_directory == SAVE_DIR
