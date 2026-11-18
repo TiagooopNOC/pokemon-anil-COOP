@@ -33,8 +33,16 @@ module AnilCoopTradeTransferQA
       raise "trade receipt missing after reload" unless receipt &&
         receipt["received"] == [pokemon.owner.id, pokemon.personalID]
       raise "wrong Pokémon after reload" unless AnilCoop.pokemon_key(pokemon) == prior["received"]
+      original = File.join(AnilCoopDev::SAVE_DIR, "Partida 1.rxdata")
+      original_hash = Digest::SHA256.file(original).hexdigest
+      raise "game save failed after trade" unless Game.save(SLOT)
+      saved = SaveData.get_data_from_file(SaveData.get_full_path(SLOT))
+      raise "trade lost on normal save" unless
+        AnilCoop.pokemon_key(saved[:player].party[0]) == prior["received"] &&
+        saved[:global_metadata].anil_coop_trade_receipts&.key?(prior["transaction"])
+      raise "original QA save changed" unless Digest::SHA256.file(original).hexdigest == original_hash
       result = { pass: true, role: "reload", received: AnilCoop.pokemon_key(pokemon),
-                 receipt: true, transaction: prior["transaction"] }
+                 receipt: true, normal_save: true, transaction: prior["transaction"] }
       return
     end
     role = ENV.fetch("ANIL_COOP_ONLINE_QA_ROLE")
