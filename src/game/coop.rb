@@ -435,12 +435,15 @@ module AnilCoop
       online_invite_receive(message) if respond_to?(:online_invite_receive)
     when "trade_state", "trade_error"
       online_trade_receive(message) if respond_to?(:online_trade_receive)
+    when "pvp_prepare", "pvp_start", "pvp_cancel"
+      pvp_receive(message)
     when "trainer_state"
       @trainer_states[[message["map"], message["event"]]] = message
       log("trainer state map=#{message["map"]} event=#{message["event"]} phase=#{message["phase"]} players=#{message["participants"].length}")
     when "trainer_closed"
       @trainer_states.delete([message["map"], message["event"]])
     when "battle_step", "battle_abort"
+      pvp_receive(message) if message["type"] == "battle_abort"
       battle_receive(message) if respond_to?(:battle_receive)
     when "pong"
       battle_wait_status(message) if respond_to?(:battle_wait_status)
@@ -448,7 +451,7 @@ module AnilCoop
       @connection_error = message["reason"]
       log("server error #{message["reason"]}")
       if message["reason"].to_s.start_with?("battle_")
-        @battle_failure = message["reason"] if @active_battle
+        @battle_failure ||= message["reason"] if @active_battle
       elsif message["reason"].to_s.start_with?("speed_") || message["reason"] == "invalid_speed"
         log("speed request rejected #{message['reason']}")
       elsif message["reason"].to_s.start_with?("trainer_") || message["reason"] == "coop_battle_pending"

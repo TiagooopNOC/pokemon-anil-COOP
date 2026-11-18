@@ -108,13 +108,17 @@ class MenuControl:
         try:
             if operation == "create":
                 env = dict(os.environ, ANIL_COOP_SECRET=secret)
-                command = [sys.executable, "-B", str(self.root / "src/server/session_server.py"),
-                           "--bind", host, "--port", str(self.server_port)]
+                if getattr(sys, "frozen", False):
+                    command = [sys.executable, "--session-server"]
+                else:
+                    command = [sys.executable, "-B", str(self.root / "src/server/session_server.py")]
+                command.extend(("--bind", host, "--port", str(self.server_port)))
                 if self.trade_enabled:
                     command.extend(("--trade-journal", str(self.trade_journal_path)))
                 self.server = subprocess.Popen(
                     command,
-                    cwd=self.root, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    cwd=self.root, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
             deadline = time.monotonic() + 5
             while True:
                 if self.server and self.server.poll() is not None:
@@ -138,6 +142,7 @@ class MenuControl:
 class ControlHandler(socketserver.StreamRequestHandler):
     def handle(self):
         try:
+            self.connection.settimeout(5)
             line = self.rfile.readline(MAX_REQUEST + 1)
             if len(line) > MAX_REQUEST or not line.endswith(b"\n"):
                 return
@@ -146,18 +151,21 @@ class ControlHandler(socketserver.StreamRequestHandler):
                 str(data.get("token", "")), self.server.token):
                 return
             operation = data.get("op")
-            if operation == "stop":
-                self.server.control.close()
-                result = {"ok": True}
-            elif operation == "status":
-                result = {"ok": True, "session": self.server.control.session,
-                          "addresses": local_addresses()}
-            elif isinstance(operation, str) and operation.startswith("trade_"):
-                with self.server.control.storage_lock:
-                    result = {"ok": True, **self.server.control.trade_storage(operation, data)}
-            else:
-                result = {"ok": True, **self.server.control.start(
-                    operation, data.get("host"), data.get("code", ""))}
+            with self.server.operation_lock:
+                if self.server.closing:
+                    return
+                if operation == "stop":
+                    self.server.control.close()
+                    result = {"ok": True}
+                elif operation == "status":
+                    result = {"ok": True, "session": self.server.control.session,
+                              "addresses": local_addresses()}
+                elif isinstance(operation, str) and operation.startswith("trade_"):
+                    with self.server.control.storage_lock:
+                        result = {"ok": True, **self.server.control.trade_storage(operation, data)}
+                else:
+                    result = {"ok": True, **self.server.control.start(
+                        operation, data.get("host"), data.get("code", ""))}
         except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as error:
             result = {"ok": False, "error": str(error)}
         self.wfile.write((json.dumps(result, separators=(",", ":")) + "\n").encode())
@@ -169,10 +177,14 @@ class ControlServer(socketserver.ThreadingTCPServer):
 
     def __init__(self, control):
         self.control = control
+        self.operation_lock = threading.Lock()
+        self.closing = False
         self.token = secrets.token_hex(16)
         super().__init__(("127.0.0.1", 0), ControlHandler)
 
     def close(self):
         self.shutdown()
         self.server_close()
-        self.control.dispose()
+        with self.operation_lock:
+            self.closing = True
+            self.control.dispose()

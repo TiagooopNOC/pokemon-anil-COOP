@@ -149,18 +149,19 @@ class AnilCoopTeamScene < PokemonParty_Scene
 end
 
 class AnilCoopTeamSelection
-  def initialize(event)
+  def initialize(event, limit: 3, label: "cooperativo")
     @event = event
+    @limit, @label = limit, label
   end
 
   def run
     chosen = previous_selection
     scene = AnilCoopTeamScene.new
     AnilCoop.instance_variable_set(:@team_menu_active, true)
-    scene.pbStartScene($player.party, "Elegí de 1 a 3 Pokémon en orden.", nil, true)
+    scene.pbStartScene($player.party, "Elegí de 1 a #{@limit} Pokémon en orden.", nil, true)
     scene.coop_show_order(chosen)
     loop do
-      scene.pbSetHelpText("Equipo #{chosen.length}/3. Elegí o confirmá.")
+      scene.pbSetHelpText("Equipo #{chosen.length}/#{@limit}. Elegí o confirmá.")
       slot = scene.pbChoosePokemon
       return false if slot < 0
       if slot == max_party_size
@@ -169,9 +170,7 @@ class AnilCoopTeamSelection
           next
         end
         begin
-          team = AnilCoop.select_team(chosen)
-          AnilCoop.trainer_send("trainer_team", @event, team: team, trainer: AnilCoop.trainer_snapshot)
-          return true
+          return confirm_team(chosen)
         rescue StandardError => e
           scene.pbDisplay(e.message)
           next
@@ -181,8 +180,8 @@ class AnilCoopTeamSelection
       pokemon = $player.party[slot]
       order = chosen.index(slot)
       commands = []
-      commands << "Agregar al equipo cooperativo" if !order && AnilCoop.team_eligible?(pokemon)
-      commands << "Quitar del equipo cooperativo" if order
+      commands << "Agregar al equipo #{@label}" if !order && AnilCoop.team_eligible?(pokemon)
+      commands << "Quitar del equipo #{@label}" if order
       commands << "Subir en el orden" if order && order > 0
       commands << "Bajar en el orden" if order && order < chosen.length - 1
       commands << "Datos"
@@ -190,13 +189,13 @@ class AnilCoopTeamSelection
       choice = scene.pbShowCommands("¿Qué hacer con #{pokemon.name}?", commands)
       next if choice < 0
       case commands[choice]
-      when "Agregar al equipo cooperativo"
-        if chosen.length >= 3
-          scene.pbDisplay("El equipo cooperativo admite hasta tres Pokémon.")
+      when "Agregar al equipo #{@label}"
+        if chosen.length >= @limit
+          scene.pbDisplay("El equipo #{@label} admite hasta #{@limit} Pokémon.")
         else
           chosen << slot
         end
-      when "Quitar del equipo cooperativo"
+      when "Quitar del equipo #{@label}"
         chosen.delete(slot)
       when "Subir en el orden"
         chosen[order - 1], chosen[order] = chosen[order], chosen[order - 1]
@@ -213,6 +212,12 @@ class AnilCoopTeamSelection
   end
 
   private
+
+  def confirm_team(chosen)
+    team = AnilCoop.select_team(chosen)
+    AnilCoop.trainer_send("trainer_team", @event, team: team, trainer: AnilCoop.trainer_snapshot)
+    true
+  end
 
   def previous_selection
     Array(AnilCoop.instance_variable_get(:@selected_team)).filter_map do |snapshot|

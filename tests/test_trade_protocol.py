@@ -95,6 +95,9 @@ class TransferProtocolTest(unittest.TestCase):
 
     def test_wrong_payload_does_not_replace_confirmed_offer(self):
         trade, first, _ = self.open_trade()
+        blocked = self.send(self.a, self.host_identity, type="invite_request", request="f" * 16,
+                            target=self.guest["id"], kind="pvp")
+        self.assertEqual(blocked["status"], "unavailable")
         wrong = full_data(first)
         wrong["pokemon"]["fields"]["personalID"] += 1
         result = self.send(self.a, self.host_identity, type="trade_payload", trade=trade.id,
