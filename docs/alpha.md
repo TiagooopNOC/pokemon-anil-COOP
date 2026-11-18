@@ -30,6 +30,23 @@ listos. El invitado entra automáticamente. Cada ventana usa los controles norma
 para su Pokémon, objetivos y reservas propias. «Combatir solo» mantiene el flujo
 individual original. Los demás jugadores pueden seguir explorando.
 
+## Intercambiar Pokémon (prueba alfa)
+
+En ambas PC, carguen y guarden una partida propia dentro de la copia aislada.
+Conéctense a la misma sala privada. Desde ESC → Online → Jugadores conectados,
+elegí a tu amigo y «Intercambiar Pokémon»; el amigo acepta la invitación.
+Cada uno elige un Pokémon y revisa ambas ofertas antes de confirmar. Cuando
+ambos confirman, el juego prepara los dos guardados, registra la decisión en
+el servidor del anfitrión y aplica el intercambio una sola vez por partida.
+No apaguen el anfitrión durante la confirmación. Si hay una caída, el anfitrión
+abre primero `Jugar-Coop.cmd` y luego el invitado abre el suyo: los lanzadores
+intentan reconciliar la operación
+antes de permitir cargar las partidas. Si el compañero no está disponible, el
+guardado queda bloqueado hasta que ambos puedan recuperarla. Para la primera
+prueba en Windows usen partidas aisladas descartables y comprueben que los dos
+Pokémon aparecen tras cerrar y volver a cargar. Las evoluciones por intercambio
+quedan pendientes.
+
 ## Comprobación manual de movimiento y objetivos
 
 Actualizá el mod en ambas PC antes de esta prueba. Con ambos en la misma sala,

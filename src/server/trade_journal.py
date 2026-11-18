@@ -1,4 +1,4 @@
-"""Durable decision ledger for future trades; not wired to live trade preview.
+"""Durable decision ledger for two-player trades.
 
 SQLite commits are synchronized before this API reports a decision. The two
 clients must still persist their own prepared records and apply atomically.

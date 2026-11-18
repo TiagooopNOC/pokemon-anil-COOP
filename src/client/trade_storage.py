@@ -1,4 +1,4 @@
-"""Local trade escrow for isolated saves; no live trade calls this yet.
+"""Local trade escrow for isolated saves.
 
 The game produces a complete candidate save in the same directory as the
 original. This helper records its hashes before the server's commit decision,
@@ -42,7 +42,9 @@ class TradeStorage:
                 pass
             else:
                 os.close(fd)
-        self.db = sqlite3.connect(self.path, isolation_level=None)
+        # The loopback helper handles both game and recovery requests in worker
+        # threads. Its caller serializes access with a lock.
+        self.db = sqlite3.connect(self.path, isolation_level=None, check_same_thread=False)
         self.db.execute("PRAGMA journal_mode=DELETE")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.execute("""CREATE TABLE IF NOT EXISTS escrow (
@@ -53,8 +55,17 @@ class TradeStorage:
             after_hash TEXT NOT NULL,
             decision TEXT,
             applied INTEGER NOT NULL DEFAULT 0,
-            completed INTEGER NOT NULL DEFAULT 0
+            completed INTEGER NOT NULL DEFAULT 0,
+            session_host TEXT,
+            session_code TEXT,
+            session_mode TEXT
         )""")
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(escrow)")}
+        for name, kind in (("completed", "INTEGER NOT NULL DEFAULT 0"),
+                           ("session_host", "TEXT"), ("session_code", "TEXT"),
+                           ("session_mode", "TEXT")):
+            if name not in columns:
+                self.db.execute(f"ALTER TABLE escrow ADD COLUMN {name} {kind}")
 
     def close(self):
         self.db.close()
@@ -87,7 +98,8 @@ class TradeStorage:
             return None
         return {"txid": row[0], "save_name": row[1], "candidate_name": row[2],
                 "before_hash": row[3], "after_hash": row[4],
-                "decision": row[5], "applied": bool(row[6]), "completed": bool(row[7])}
+                "decision": row[5], "applied": bool(row[6]), "completed": bool(row[7]),
+                "session_host": row[8], "session_code": row[9], "session_mode": row[10]}
 
     def pending(self):
         rows = self.db.execute("SELECT txid FROM escrow WHERE completed=0 AND decision IS NOT 'abort'").fetchall()
@@ -114,7 +126,7 @@ class TradeStorage:
                 raise ValueError("trade lock belongs to another transaction")
             self.lock_path.unlink()
 
-    def prepare(self, txid, save_name, candidate_name, before_hash):
+    def prepare(self, txid, save_name, candidate_name, before_hash, session=None):
         self._txid(txid)
         if not isinstance(save_name, str) or not SAVE_NAME.fullmatch(save_name):
             raise ValueError("invalid save slot")
@@ -122,6 +134,12 @@ class TradeStorage:
             raise ValueError("invalid candidate filename")
         if not isinstance(before_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", before_hash):
             raise ValueError("invalid original digest")
+        session = session or {}
+        if session and (session.get("mode") not in ("create", "join") or
+                        not isinstance(session.get("host"), str) or
+                        not isinstance(session.get("code"), str) or
+                        not re.fullmatch(r"[A-Z0-9]{12}", session["code"])):
+            raise ValueError("invalid recovery session")
         original, candidate = self._file(save_name), self._file(candidate_name)
         if not original.is_file() or not candidate.is_file() or candidate.stat().st_size > MAX_SAVE_BYTES:
             raise ValueError("missing or oversized save")
@@ -139,13 +157,17 @@ class TradeStorage:
         self._lock(txid)  # Before durable receipt: a crash must block game startup.
         with self._atomic():
             self.db.execute("""INSERT OR IGNORE INTO escrow
-                (txid, save_name, candidate_name, before_hash, after_hash)
-                VALUES (?, ?, ?, ?, ?)""",
-                (txid, save_name, candidate_name, before_hash, after_hash))
+                (txid, save_name, candidate_name, before_hash, after_hash,
+                 session_host, session_code, session_mode)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (txid, save_name, candidate_name, before_hash, after_hash,
+                 session.get("host"), session.get("code"), session.get("mode")))
             record = self.get(txid)
             if record is None or any(record[k] != value for k, value in (
                 ("save_name", save_name), ("candidate_name", candidate_name),
-                ("before_hash", before_hash), ("after_hash", after_hash)
+                ("before_hash", before_hash), ("after_hash", after_hash),
+                ("session_host", session.get("host")), ("session_code", session.get("code")),
+                ("session_mode", session.get("mode"))
             )):
                 raise ValueError("prepared candidate is immutable")
         return after_hash

@@ -151,6 +151,19 @@ class State:
                         self.trade_journal.mark_applied(trade_id, player["profile"])
                         return {"type": "trade_recovery", **self.trade_journal.get(trade_id)}, identity
                     return {"type": "trade_error", "trade": trade_id, "reason": "unavailable"}, identity
+                if kind == "trade_prepared" and message.keys() == {"type", "trade", "own_digest", "incoming_digest"} and trade_id not in room["trades"]:
+                    record = self.trade_journal.get(trade_id) if self.trade_journal else None
+                    if record and record["decision"] in (None, "commit") and player.get("profile") in record["players"]:
+                        if record["decision"] is None:
+                            try:
+                                self.trade_journal.mark_prepared(trade_id, player["profile"],
+                                    message["own_digest"], message["incoming_digest"])
+                                if self.trade_journal.get(trade_id)["prepared"] == (True, True):
+                                    self.trade_journal.decide_commit(trade_id)
+                            except ValueError:
+                                return {"type": "trade_error", "trade": trade_id, "reason": "invalid_prepare"}, identity
+                        return {"type": "trade_recovery", **self.trade_journal.get(trade_id)}, identity
+                    return {"type": "trade_error", "trade": trade_id, "reason": "unavailable"}, identity
                 if kind == "trade_aborted" and message.keys() == {"type", "trade"}:
                     record = self.trade_journal.get(trade_id) if self.trade_journal else None
                     if record and record["decision"] == "abort" and player.get("profile") in record["players"]:
@@ -658,6 +671,7 @@ class State:
         if trade.transfer_enabled and self.trade_journal:
             record = self.trade_journal.get(trade.id)
             if record:
+                packet["decision"] = record["decision"]
                 packet["digests"] = {peer: record["digests"][i] for i, peer in enumerate(trade.players)}
                 packet["prepared"] = {peer: record["prepared"][i] for i, peer in enumerate(trade.players)}
                 packet["applied"] = {peer: record["applied"][i] for i, peer in enumerate(trade.players)}

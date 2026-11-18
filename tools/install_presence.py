@@ -62,6 +62,7 @@ def main():
         shutil.copy2(ROOT / "src/game/coop_trade_candidate.rb", game / "CoopDev/coop_trade_candidate.rb")
         shutil.copy2(ROOT / "src/game/trade_data_qa.rb", game / "CoopDev/trade_data_qa.rb")
         shutil.copy2(ROOT / "src/game/trade_candidate_qa.rb", game / "CoopDev/trade_candidate_qa.rb")
+        shutil.copy2(ROOT / "src/game/trade_transfer_qa.rb", game / "CoopDev/trade_transfer_qa.rb")
         shutil.copy2(ROOT / "src/game/trade_preview_qa.rb", game / "CoopDev/trade_preview_qa.rb")
         shutil.copy2(ROOT / "src/game/online_invite_qa.rb", game / "CoopDev/online_invite_qa.rb")
         shutil.copy2(ROOT / "src/game/online_team_qa.rb", game / "CoopDev/online_team_qa.rb")

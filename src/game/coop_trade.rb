@@ -1,4 +1,5 @@
-# Trade preparation only. Never mutates a party, inventory, save, or Pokédex.
+# Trade UI. Durable transfer path is enabled only when the host's server has a
+# journal; the existing preview remains available otherwise.
 module AnilCoop
   def self.online_trade_receive(message)
     trade = message["trade"]
@@ -9,7 +10,7 @@ module AnilCoop
     end
     players = message["players"]
     return unless players.is_a?(Array) && players.length == 2 && players.include?(@id)
-    return unless message["transfer_enabled"] == false
+    return unless message["transfer_enabled"] == false || message["transfer_enabled"] == true
     return unless message["offers"].is_a?(Hash) && message["confirmed"].is_a?(Array)
     @trade_sessions ||= {}
     @trade_sessions[trade] = message
@@ -41,6 +42,10 @@ module AnilCoop
         AnilCoopTradeScreen.new(trade).run
       rescue StandardError => e
         log("trade preview #{e.class}: #{e.message}")
+        if @trade_escrow_active
+          log("trade escrow must recover #{trade}")
+          exit
+        end
         queue(type: "trade_cancel", trade: trade) if connected?
         pbMessage("Preparación del intercambio: #{e.message}") { battle_tick }
       ensure
@@ -119,13 +124,35 @@ class AnilCoopTradeScreen
       Input.update
       AnilCoop.tick($scene)
       current = state
-      break unless AnilCoop.connected? && current
-      if current["phase"] != "choosing"
-        text = current["phase"] == "preview_complete" ?
-          "Ambos confirmaron. No se transfirió ningún Pokémon: la persistencia segura está pendiente." :
-          "La preparación terminó. Los equipos no cambiaron."
-        pbMessage(text) { AnilCoop.battle_tick }
+      unless AnilCoop.connected? && current
+        exit if @trade_prepared && !@trade_finished
         break
+      end
+      if current["phase"] != "choosing"
+        if current["transfer_enabled"]
+          case current["phase"]
+          when "payloads" then publish_payload(current)
+          when "preparing" then prepare_local(current)
+          when "commit" then apply_local(current)
+          when "complete"
+            finish_local
+            pbMessage("Intercambio completado. Ambos Pokémon quedaron guardados.") { AnilCoop.battle_tick }
+            break
+          else
+            abort_local(current)
+            pbMessage("Intercambio cancelado; los equipos no cambiaron.") { AnilCoop.battle_tick }
+            break
+          end
+          draw if Time.now.to_f - @last_draw > 0.5
+          @last_draw = Time.now.to_f
+          next
+        else
+          text = current["phase"] == "preview_complete" ?
+            "Ambos confirmaron. No se transfirió ningún Pokémon: la persistencia segura está pendiente." :
+            "La preparación terminó. Los equipos no cambiaron."
+          pbMessage(text) { AnilCoop.battle_tick }
+          break
+        end
       end
       if (error = AnilCoop.instance_variable_get(:@trade_error))
         AnilCoop.instance_variable_set(:@trade_error, nil)
@@ -163,6 +190,73 @@ class AnilCoopTradeScreen
   ensure
     pbDisposeSpriteHash(@sprites) if @sprites
     @viewport.dispose if @viewport && !@viewport.disposed?
+  end
+
+  def publish_payload(current)
+    return if @payload_sent
+    pokemon = $player.party[@local_slot] if @local_slot
+    raise "El Pokémon ofrecido ya no está disponible" unless pokemon &&
+      AnilCoop.trade_eligible?(pokemon) &&
+      AnilCoop.trade_preview_snapshot(pokemon, @local_slot) == current["offers"][@my_id]
+    @full_payload = AnilCoopTradeData.pack(pokemon)
+    AnilCoop.queue(type: "trade_payload", trade: @trade, payload: @full_payload)
+    @payload_sent = true
+  end
+
+  def prepare_local(current)
+    return if @trade_prepared
+    peer = peer_id
+    payloads = current.fetch("payloads")
+    digests = current.fetch("digests")
+    raise "Oferta completa incompleta" unless @full_payload && payloads[@my_id] == @full_payload &&
+      payloads[peer].is_a?(Hash) && digests[@my_id].is_a?(String) && digests[peer].is_a?(String)
+    AnilCoopTradeData.unpack(payloads[peer])
+    @original_party_bytes = Marshal.dump($player.party)
+    @candidate = AnilCoopTradeCandidate.create(@trade, @local_slot, @full_payload, payloads[peer])
+    # Any uncertainty after this point must terminate the game. The launcher
+    # will reconcile the durable local receipt before opening the save again.
+    AnilCoop.instance_variable_set(:@trade_escrow_active, true)
+    @trade_prepared = true
+    prepared = AnilCoop.menu_request("trade_prepare", @candidate.merge(trade: @trade))
+    raise "El guardado candidato cambió" unless prepared["after_hash"] == @candidate["after_hash"]
+    AnilCoop.queue(type: "trade_prepared", trade: @trade,
+                   own_digest: digests[@my_id], incoming_digest: digests[peer])
+  end
+
+  def apply_local(current)
+    return if @trade_applied
+    raise "No se preparó el guardado local" unless @trade_prepared && @candidate
+    raise "El equipo cambió durante el intercambio" unless Marshal.dump($player.party) == @original_party_bytes
+    AnilCoop.menu_request("trade_decide", trade: @trade, decision: "commit")
+    applied = AnilCoop.menu_request("trade_apply", trade: @trade)
+    raise "Guardado aplicado incompatible" unless applied["after_hash"] == @candidate["after_hash"]
+    data = SaveData.get_data_from_file(SaveData.get_full_path($player.save_slot))
+    raise "Recibo de intercambio ausente" unless data[:global_metadata].anil_coop_trade_receipts&.key?(@trade)
+    $player.party[@local_slot] = data[:player].party[@local_slot]
+    $PokemonGlobal.anil_coop_trade_receipts = data[:global_metadata].anil_coop_trade_receipts
+    @trade_applied = true
+    AnilCoop.queue(type: "trade_applied", trade: @trade)
+  end
+
+  def finish_local
+    if @trade_prepared
+      raise "Intercambio todavía no aplicado" unless @trade_applied
+      AnilCoop.menu_request("trade_finish", trade: @trade)
+    end
+    @trade_finished = true
+    AnilCoop.instance_variable_set(:@trade_escrow_active, false)
+  end
+
+  def abort_local(current)
+    if @trade_prepared
+      # Once prepared, only the host's durable abort decision permits rollback.
+      # An ambiguous disconnect stays locked for launcher recovery.
+      exit unless current["decision"] == "abort"
+      AnilCoop.menu_request("trade_decide", trade: @trade, decision: "abort")
+      AnilCoop.queue(type: "trade_aborted", trade: @trade) if AnilCoop.connected?
+    end
+    @trade_finished = true
+    AnilCoop.instance_variable_set(:@trade_escrow_active, false)
   end
 
   def select_offer
@@ -235,7 +329,10 @@ class AnilCoopTradeScreen
       @local_slot = nil
       return
     end
-    choice = pbMessage("¿Confirmar esta propuesta? Todavía no se transferirán Pokémon.",
+    prompt = current["transfer_enabled"] ?
+      "¿Confirmar este intercambio real? Se guardará tras la preparación de ambos." :
+      "¿Confirmar esta propuesta? Todavía no se transferirán Pokémon."
+    choice = pbMessage(prompt,
                        ["Sí", "No"], -1, nil, 1) { AnilCoop.battle_tick }
     latest = state
     if choice == 0 && latest && latest["version"] == current["version"] &&
@@ -306,7 +403,16 @@ class AnilCoopTradeScreen
     bitmap.fill_rect(0, 0, Graphics.width, 50, PANEL)
     pbSetSystemFont(bitmap)
     pbDrawTextPositions(bitmap, [["INTERCAMBIO", 17, 3, :left, GOLD, SHADOW]])
-    text(bitmap, "Preparación · no transfiere Pokémon", 18, 31, MUTED, true)
+    phase = state && state["phase"]
+    subtitle = if state && state["transfer_enabled"]
+                 { "choosing" => "Preparación segura · intercambio real",
+                   "payloads" => "Verificando datos completos...",
+                   "preparing" => "Guardando preparaciones de ambos jugadores...",
+                   "commit" => "Aplicando guardados; no cierres el juego..." }[phase] || "Confirmando resultado..."
+               else
+                 "Preparación · no transfiere Pokémon"
+               end
+    text(bitmap, subtitle, 18, 31, MUTED, true)
     card(bitmap, 12, offers[@my_id], @my_id, "TU OFERTA")
     card(bitmap, 262, offers[peer_id], peer_id, "RECIBIRÍAS")
     labels = ["Elegir / cambiar Pokémon", "Ver mis datos", "Ver datos del compañero",

@@ -80,6 +80,7 @@ class TransferProtocolTest(unittest.TestCase):
         self.assertEqual(self.journal.get(trade.id)["applied"], (True, True))
         self.assertEqual(self.a.messages[-1]["phase"], "complete")
         self.assertEqual(self.b.messages[-1]["phase"], "complete")
+        self.assertEqual(self.a.messages[-1]["decision"], "commit")
 
     def test_cancel_after_one_preparation_persists_abort(self):
         trade, record = self.prepare()
@@ -90,6 +91,7 @@ class TransferProtocolTest(unittest.TestCase):
         self.assertEqual(self.journal.get(trade.id)["decision"], "abort")
         self.assertEqual(self.a.messages[-1]["phase"], "cancelled")
         self.assertEqual(self.b.messages[-1]["phase"], "cancelled")
+        self.assertEqual(self.a.messages[-1]["decision"], "abort")
 
     def test_wrong_payload_does_not_replace_confirmed_offer(self):
         trade, first, _ = self.open_trade()

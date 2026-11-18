@@ -42,6 +42,8 @@ def main() -> int:
     parser.add_argument("--qa-online-team", action="store_true", help="Check live remote party in two native engines")
     parser.add_argument("--qa-online-invites", action="store_true", help="Check targeted invitations in two native engines")
     parser.add_argument("--qa-trade-preview", action="store_true", help="Check visual trade negotiation without transfers")
+    parser.add_argument("--qa-trade-transfer", action="store_true", help="Exchange disposable Pokémon in two real Wine engines")
+    parser.add_argument("--qa-trade-transfer-reload", action="store_true", help="Reload both disposable traded saves in Wine")
     parser.add_argument("--qa-trade-data", action="store_true", help="Check complete Pokémon round trips without transfers")
     parser.add_argument("--qa-trade-candidate", choices=("create", "reload"), help="Check an isolated disposable trade save")
     parser.add_argument("--qa-story-inspect", action="store_true", help="Inspect original rival events read-only")
@@ -69,9 +71,11 @@ def main() -> int:
         raise SafetyError("--qa-presence-labels needs --session and two clients")
     if args.qa_presence_followers and (not args.session or len(selected) != 2 or args.qa_presence or args.qa_presence_network or args.qa_presence_labels):
         raise SafetyError("--qa-presence-followers needs --session and two clients")
-    online_scenarios = sum((args.qa_online, args.qa_online_team, args.qa_online_invites, args.qa_trade_preview))
+    online_scenarios = sum((args.qa_online, args.qa_online_team, args.qa_online_invites, args.qa_trade_preview, args.qa_trade_transfer))
     if online_scenarios and (args.session or selected != ["client03", "client04"] or online_scenarios != 1):
         raise SafetyError("Online QA needs client03 and client04, one scenario, no prestarted session")
+    if args.qa_trade_transfer_reload and (online_scenarios or selected != ["client03", "client04"]):
+        raise SafetyError("Trade reload QA needs only client03 and client04")
     if args.client and args.clients:
         raise SafetyError("Choose --client or --clients")
     plan = launch_plan(ROOT, selected)["clients"]
@@ -121,10 +125,19 @@ def main() -> int:
         online_report = ("qa-online-result.json" if args.qa_online else
                          "qa-online-team-result.json" if args.qa_online_team else
                          "qa-invites-result.json" if args.qa_online_invites else
-                         "qa-trade-preview-result.json" if args.qa_trade_preview else None)
+                         "qa-trade-preview-result.json" if args.qa_trade_preview else
+                         "qa-trade-transfer-result.json" if args.qa_trade_transfer else None)
         if online_report and (profile / online_report).exists():
-            (profile / online_report).rename(
-                profile / "logs" / ("previous-" + uuid.uuid4().hex + "-" + online_report))
+            if args.qa_trade_transfer:
+                (profile / online_report).replace(profile / "qa-trade-transfer-previous.json")
+            else:
+                (profile / online_report).rename(
+                    profile / "logs" / ("previous-" + uuid.uuid4().hex + "-" + online_report))
+        if args.qa_trade_transfer_reload:
+            source = profile / "qa-trade-transfer-result.json"
+            if not source.is_file():
+                raise SafetyError("First complete the disposable transfer QA")
+            source.replace(profile / "qa-trade-transfer-previous.json")
         if args.qa_trade_data and (profile / "qa-trade-data-result.json").exists():
             (profile / "qa-trade-data-result.json").rename(
                 profile / "logs" / ("previous-" + uuid.uuid4().hex + "-qa-trade-data-result.json"))
@@ -172,9 +185,11 @@ def main() -> int:
             run_env.pop("ANIL_COOP_TRADE_QA", None)
             run_env.pop("ANIL_COOP_TRADE_DATA_QA", None)
             run_env.pop("ANIL_COOP_TRADE_CANDIDATE_QA", None)
+            run_env.pop("ANIL_COOP_TRADE_TRANSFER_QA", None)
             run_env.pop("ANIL_COOP_ONLINE_QA_ROLE", None)
             if online_scenarios:
-                control = MenuControl(ROOT, server_port=17641)
+                control = MenuControl(ROOT, server_port=17641, profile=profile,
+                                      trade_enabled=args.qa_trade_transfer)
                 server = ControlServer(control)
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
@@ -184,7 +199,8 @@ def main() -> int:
                                ANIL_COOP_ONLINE_QA_ROLE="create" if client["client"] == "client03" else "join")
                 flag = ("ANIL_COOP_ONLINE_QA" if args.qa_online else
                         "ANIL_COOP_ONLINE_TEAM_QA" if args.qa_online_team else
-                        "ANIL_COOP_INVITE_QA" if args.qa_online_invites else "ANIL_COOP_TRADE_QA")
+                        "ANIL_COOP_INVITE_QA" if args.qa_online_invites else
+                        "ANIL_COOP_TRADE_TRANSFER_QA" if args.qa_trade_transfer else "ANIL_COOP_TRADE_QA")
                 run_env[flag] = "1"
             if args.coop_battles:
                 run_env.update(ANIL_COOP_BATTLES="1", ANIL_COOP_PERSONAL_TEAM="1")
@@ -206,6 +222,8 @@ def main() -> int:
                 run_env["ANIL_COOP_TRADE_DATA_QA"] = "1"
             if args.qa_trade_candidate:
                 run_env["ANIL_COOP_TRADE_CANDIDATE_QA"] = args.qa_trade_candidate
+            if args.qa_trade_transfer_reload:
+                run_env["ANIL_COOP_TRADE_TRANSFER_QA"] = "reload"
             if args.qa_story_inspect:
                 run_env["ANIL_COOP_STORY_QA"] = "inspect"
             if args.qa_2v2:
@@ -276,6 +294,15 @@ def main() -> int:
             for observation, client in zip(observations, plan):
                 report = Path(client["save_directory"]).parent / "qa-trade-preview-result.json"
                 observation["trade_preview_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
+        if args.qa_trade_transfer or args.qa_trade_transfer_reload:
+            for observation, client in zip(observations, plan):
+                report = Path(client["save_directory"]).parent / "qa-trade-transfer-result.json"
+                observation["trade_transfer_qa"] = read_json(report) if report.is_file() else {"pass": False, "error": "missing result"}
+            first, second = (item["trade_transfer_qa"] for item in observations)
+            if args.qa_trade_transfer and first.get("pass") and second.get("pass") and (first.get("gave") != second.get("received") or
+                    second.get("gave") != first.get("received") or first.get("transaction") != second.get("transaction")):
+                first["pass"] = second["pass"] = False
+                first["error"] = second["error"] = "cross-client Pokémon or transaction mismatch"
         if args.qa_trade_data:
             for observation, client in zip(observations, plan):
                 report = Path(client["save_directory"]).parent / "qa-trade-data-result.json"
@@ -293,6 +320,7 @@ def main() -> int:
                         (not args.qa_online_team or item["online_team_qa"]["pass"]) and
                         (not args.qa_online_invites or item["invite_qa"]["pass"]) and
                         (not args.qa_trade_preview or item["trade_preview_qa"]["pass"]) and
+                        (not (args.qa_trade_transfer or args.qa_trade_transfer_reload) or item["trade_transfer_qa"]["pass"]) and
                         (not args.qa_trade_data or item["trade_data_qa"]["pass"]) and
                         (not args.qa_trade_candidate or item["trade_candidate_qa"]["pass"]) and
                         (not (args.qa_presence or args.qa_presence_network or args.qa_presence_labels or args.qa_presence_followers) or item["presence_qa"]["pass"])

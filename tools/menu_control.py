@@ -11,6 +11,7 @@ import socket
 import socketserver
 import subprocess
 import sys
+import threading
 import time
 
 from src.client.bridge import Bridge
@@ -38,10 +39,13 @@ def local_addresses():
 
 
 class MenuControl:
-    def __init__(self, root, *, server_port=17641, profile=None):
+    def __init__(self, root, *, server_port=17641, profile=None, trade_enabled=False):
         self.root = root
         self.server_port = server_port
         self.storage = TradeStorage(Path(profile) / "saves") if profile else None
+        self.storage_lock = threading.RLock()
+        self.trade_enabled = bool(trade_enabled and profile)
+        self.trade_journal_path = Path(profile) / "trade-server.sqlite3" if profile else None
         self.server = None
         self.bridge = None
         self.session = None
@@ -63,8 +67,9 @@ class MenuControl:
     def dispose(self):
         self.close()
         if self.storage:
-            self.storage.close()
-            self.storage = None
+            with self.storage_lock:
+                self.storage.close()
+                self.storage = None
 
     def trade_storage(self, operation, data):
         if not self.storage:
@@ -74,7 +79,7 @@ class MenuControl:
             return {"pending": self.storage.pending()}
         if operation == "trade_prepare":
             after = self.storage.prepare(txid, data.get("save_name"),
-                                         data.get("candidate_name"), data.get("before_hash"))
+                                         data.get("candidate_name"), data.get("before_hash"), self.session)
             return {"after_hash": after}
         if operation == "trade_decide":
             self.storage.decide(txid, data.get("decision"))
@@ -103,9 +108,12 @@ class MenuControl:
         try:
             if operation == "create":
                 env = dict(os.environ, ANIL_COOP_SECRET=secret)
+                command = [sys.executable, "-B", str(self.root / "src/server/session_server.py"),
+                           "--bind", host, "--port", str(self.server_port)]
+                if self.trade_enabled:
+                    command.extend(("--trade-journal", str(self.trade_journal_path)))
                 self.server = subprocess.Popen(
-                    [sys.executable, "-B", str(self.root / "src/server/session_server.py"),
-                     "--bind", host, "--port", str(self.server_port)],
+                    command,
                     cwd=self.root, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             deadline = time.monotonic() + 5
             while True:
@@ -145,7 +153,8 @@ class ControlHandler(socketserver.StreamRequestHandler):
                 result = {"ok": True, "session": self.server.control.session,
                           "addresses": local_addresses()}
             elif isinstance(operation, str) and operation.startswith("trade_"):
-                result = {"ok": True, **self.server.control.trade_storage(operation, data)}
+                with self.server.control.storage_lock:
+                    result = {"ok": True, **self.server.control.trade_storage(operation, data)}
             else:
                 result = {"ok": True, **self.server.control.start(
                     operation, data.get("host"), data.get("code", ""))}
